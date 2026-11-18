@@ -1,0 +1,11 @@
+# Generated files and local machine configuration
+BUILD/
+DIST/
+TOOLS/
+*.OBJ
+*.MAP
+*.BAK
+*.SWP
+*.pyc
+__pycache__/
+MAKE.LOCAL.BAT

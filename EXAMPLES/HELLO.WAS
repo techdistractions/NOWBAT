@@ -1,0 +1,9 @@
+# A simple NOWBAT task; leaves Windows open.
+ShowIcon=YES
+LOGFILE "HELLO.LOG"
+LOG "Hello from NOWBAT"
+LOG "Windows version %WINVER%"
+LOG "Desktop %SCREENW%x%SCREENH%"
+WAIT 2000
+LOGCLOSE
+END

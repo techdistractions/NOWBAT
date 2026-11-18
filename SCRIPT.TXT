@@ -1,0 +1,162 @@
+NOWBAT - SCRIPT COMMANDS
+========================
+
+Run from inside Windows: NOWBAT.EXE SCRIPT.WAS
+One instruction per line. Commands are case-insensitive. Use a leading
+# or ; for comments and :NAME for labels. Quote paths containing spaces.
+DOS 8.3 filenames are recommended. %NAME% expands a variable.
+
+COMMAND: SHOWICON
+SYNTAX: ShowIcon=YES or ShowIcon=NO
+Show or hide NOWBAT's minimized task icon. Default: NO. On Windows 2/3,
+the icon has Close, Switch To and About menu options.
+
+COMMAND: LOGFILE
+SYNTAX: LOGFILE "file.log"
+Create/truncate a log and select it for subsequent output.
+
+COMMAND: LOG
+SYNTAX: LOG "message"
+Write one line to the selected log (WAS.LOG by default).
+
+COMMAND: LOGCLOSE
+SYNTAX: LOGCLOSE
+Close the selected log.
+
+COMMAND: SET
+SYNTAX: SET NAME=value
+Set a string variable (max 8; names up to 15 chars, values up to 95).
+
+COMMAND: IF
+SYNTAX: IF left EQ|NE|=|<> right [THEN] GOTO|GOSUB label
+Case-insensitive string comparison after variable expansion.
+
+COMMAND: GOTO
+SYNTAX: GOTO label
+Jump to :label.
+
+COMMAND: GOSUB
+SYNTAX: GOSUB label
+Call a :label subroutine (up to four nested calls).
+
+COMMAND: RETURN
+SYNTAX: RETURN
+Return from the current GOSUB.
+
+COMMAND: ASSERT
+SYNTAX: ASSERT left EQ|NE|=|<> right
+Continue on success. On failure, report the error and request Windows
+shutdown. Use IF/GOTO for a nonfatal check.
+
+COMMAND: WAIT
+SYNTAX: WAIT milliseconds
+Cooperative pause, 0 through 59000 milliseconds.
+
+COMMAND: SHELL
+SYNTAX: SHELL "program.exe" ["arguments"]
+Start a Windows NE application and continue immediately. Not DOS EXEC.
+
+COMMAND: SHELLWAIT
+SYNTAX: SHELLWAIT "program.exe" ["arguments"]
+Start a Windows NE application and wait for its module to unload. This
+is not a DOS child exit code. Saving/closing is the child's responsibility.
+
+COMMAND: COPY
+SYNTAX: COPY "source" "destination"
+Copy one file; overwrite the destination. No wildcards.
+
+COMMAND: MOVE
+SYNTAX: MOVE "source" "destination"
+Move one file. Across drives, copy then delete the source on success.
+
+COMMAND: REN
+ALIASES: RENAME
+SYNTAX: REN "oldpath" "newpath"
+Rename a file on the same drive without overwriting a target file.
+
+COMMAND: DEL
+ALIASES: DELETE, ERASE
+SYNTAX: DEL "filename"
+Delete one file; not recursive.
+
+COMMAND: MKDIR
+ALIASES: MD
+SYNTAX: MKDIR "directory"
+Create a directory; parent must exist.
+
+COMMAND: RMDIR
+ALIASES: RD
+SYNTAX: RMDIR "directory"
+Remove an empty directory.
+
+COMMAND: CHDIR
+ALIASES: CD
+SYNTAX: CHDIR "directory"
+Change the working directory.
+
+COMMAND: DIR
+SYNTAX: DIR ["filespec"]
+Write matching DOS filenames to the active log. Wildcards supported.
+
+COMMAND: PWD
+SYNTAX: PWD
+Write the current working directory to the log.
+
+COMMAND: EXISTS
+SYNTAX: EXISTS "filename"
+Check whether a file can be opened for reading (not a directory test).
+
+COMMAND: SNAP
+SYNTAX: SNAP "file.bmp" [BPP=n]
+SYNTAX: SNAP "file.bmp",x,y,x1,y1[,BPP=n]
+Capture the desktop (default) or inclusive region to BMP. n=1,4,8,24.
+
+COMMAND: TARCREATE
+SYNTAX: TARCREATE "archive.tar"
+Create/truncate an uncompressed TAR archive.
+
+COMMAND: TARADD
+SYNTAX: TARADD "file-or-wildcard"
+Add a file or matching DOS filenames to the current TAR.
+
+COMMAND: TARCLOSE
+SYNTAX: TARCLOSE
+Finish and close the archive. Always call this after TARADD.
+
+COMMAND: END
+SYNTAX: END
+Close NOWBAT without closing Windows.
+
+COMMAND: PASS
+SYNTAX: PASS
+Exit NOWBAT with an internal success status.
+
+COMMAND: FAIL
+SYNTAX: FAIL
+Exit NOWBAT with an internal failure status.
+
+COMMAND: SHUTDOWN
+SYNTAX: SHUTDOWN
+Ask Windows to end the session; confirmation dialogs may appear.
+
+VALUES AND ERRORS
+-----------------
+%RESULT% and %ERRORCODE% describe the last supported operation. Filesystem
+errors normally set RESULT to 1 and ERRORCODE to the DOS error rather than
+stopping the script. %WINVER%, %SCREENW%, %SCREENH%, %BPP%, and
+%DISKFREE(C)% (choose drive letter A..Z) are read-only environment values.
+IF and ASSERT test string equality/inequality, not numeric ordering.
+
+EXAMPLE
+-------
+ShowIcon=YES
+WAIT 5000
+SNAP "SCREEN.BMP" BPP=4
+IF %RESULT% NE 0 THEN GOTO FAILED
+TARCREATE "SCREEN.TAR"
+TARADD "SCREEN.BMP"
+TARCLOSE
+END
+:FAILED
+LOG "Screenshot failed"
+END
