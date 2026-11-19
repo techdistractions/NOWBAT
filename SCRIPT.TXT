@@ -109,7 +109,21 @@ Check whether a file can be opened for reading (not a directory test).
 COMMAND: SNAP
 SYNTAX: SNAP "file.bmp" [BPP=n]
 SYNTAX: SNAP "file.bmp",x,y,x1,y1[,BPP=n]
-Capture the desktop (default) or inclusive region to BMP. n=1,4,8,24.
+Same arguments as the published NOWBAT command. No changes to existing
+scripts are required. Without coordinates it captures the full desktop;
+without BPP it detects the current Windows display depth.
+The default engine is now FAST, using direct video memory for supported
+1/4-bpp graphics modes. Unsupported modes/regions return RESULT=2 rather
+than quietly running a multi-minute GDI capture. FAST region captures
+require X and width to be multiples of eight pixels.
+Use SNAPSAFE for graphics drivers and modes unsupported by FAST.
+
+COMMAND: SNAPSAFE
+SYNTAX: SNAPSAFE "file.bmp" [BPP=n]
+SYNTAX: SNAPSAFE "file.bmp",x,y,x1,y1[,BPP=n]
+Same filename, region and BPP arguments as SNAP, but always uses the
+original GDI GetPixel implementation. It is slower, but supports unusual
+video drivers and optional output depths 1, 4, 8 and 24 bpp.
 
 COMMAND: TARCREATE
 SYNTAX: TARCREATE "archive.tar"
@@ -141,6 +155,12 @@ Ask Windows to end the session; confirmation dialogs may appear.
 
 VALUES AND ERRORS
 -----------------
+%TIME% gives the current DOS clock in HH:MM:SS format. %DATE% gives
+YYYY-MM-DD. Both are evaluated each time a script expands them, including
+inside LOG, rather than being fixed when NOWBAT starts.
+
+Example: LOG "SNAP started at %DATE% %TIME%"
+
 %RESULT% and %ERRORCODE% describe the last supported operation. Filesystem
 errors normally set RESULT to 1 and ERRORCODE to the DOS error rather than
 stopping the script. %WINVER%, %SCREENW%, %SCREENH%, %BPP%, and
@@ -151,7 +171,7 @@ EXAMPLE
 -------
 ShowIcon=YES
 WAIT 5000
-SNAP "SCREEN.BMP" BPP=4
+SNAP "SCREEN.BMP"
 IF %RESULT% NE 0 THEN GOTO FAILED
 TARCREATE "SCREEN.TAR"
 TARADD "SCREEN.BMP"

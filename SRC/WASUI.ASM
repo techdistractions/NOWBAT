@@ -57,7 +57,7 @@ uiWinMajor db 0         ; Win1: no system menu/About; Win2/3 retain both
 uiName db 'NOWBAT',0
 uiSwitchName db 'Switch To...',0
 uiAboutName db 'About...',0
-uiAboutMessage db 'NOWBAT - Windows Admin Script',13,10,'Version: 0.0.46',0
+uiAboutMessage db 'NOWBAT - Windows Admin Script',13,10,'Version: 0.0.47',0
 ; MSG: HWND,UINT,WPARAM,LPARAM,DWORD time,POINT(x,y), 18 bytes.
 ; UiClass is already registered before this union is used as message space.
 uiMsg EQU uiClass

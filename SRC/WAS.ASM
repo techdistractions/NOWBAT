@@ -1,4 +1,4 @@
-; NOWBAT 0.0.46: compact Windows Automated Scripting runtime (8088 baseline).
+; NOWBAT 0.0.47: compact Windows Automated Scripting runtime (8088 baseline).
 ; Tiny 8086 Win16 interpreter; native evidence is required for runtime PASS.
 ; The executor is intentionally line-at-a-time. GOTO scans the script on disk.
 .8086
@@ -38,6 +38,8 @@ extrn TarCreate:near
 extrn TarAdd:near
 extrn TarClose:near
 extrn SnapDo:near
+extrn snapMethod:byte
+extrn snapVideoMode:byte
 extrn FsUnary:near
 extrn FsBinary:near
 extrn FsDir:near
@@ -45,13 +47,14 @@ extrn FsPwd:near
 
 .data
  dw 0,0,5,0,0,0,0,0      ; original Win1/Win2 automatic DGROUP prefix
-PUBLIC wasInput,wasResult,wasIo,wasRect,wasBpp
+PUBLIC wasInput,wasResult,wasIo,wasRect,wasBpp,wasSnapMode
 wasInput       db 260 dup(0)
 wasResult      dw 0
 wasErrorCode   dw 0
 wasIo          dw 0FFFFh
 wasRect        dw 4 dup(0FFFFh)
 wasBpp         dw 0
+wasSnapMode    db 0     ; 0=COMPAT, 1=FAST (SNAP default), 2=AUTO
 wasInst        dw 0
 wasDefault     db 'WAS.WAS',0
 wasScript      db 128 dup(0)
@@ -73,6 +76,7 @@ wasVarNames    db 128 dup(0)  ; 8 x 16
 wasVarValues   db 768 dup(0)  ; 8 x 96
 wasVarCount    dw 0
 wasNumResult   db 12 dup(0) ; decimal WORD/DWORD output, shared by built-in vars
+wasClockResult db 16 dup(0) ; DATE YYYY-MM-DD or TIME HH:MM:SS (live DOS clock)
 wasSetTarget   db 16 dup(0)
 wasSnapPath    db 260 dup(0)
 wasCRLF        db 13,10
@@ -106,7 +110,7 @@ wasRawTail     db 128 dup(0)
 wasTraceH      dw 0FFFFh
 wasTracePath   db 'EARLY.LOG',0
 traceTask      db 'WAS_INITTASK',0
-traceBuild     db 'NOWBAT_BUILD=W046',0 ; resident startup identity for audit
+traceBuild     db 'NOWBAT_BUILD=W047',0 ; resident startup identity for audit
 traceApp       db 'WAS_INITAPP',0
 traceVersion   db 'WAS_VERSION=',0
 traceWinFlags  db 'WAS_WINFLAGS=',0
@@ -114,6 +118,10 @@ wasHex         db 4 dup(0),0
 traceTail      db 'WAS_TAIL=',0
 traceScript    db 'WAS_SCRIPT=',0
 traceOpen      db 'WAS_OPEN=',0
+traceSnapDirect db 'SNAP_METHOD=VIDEO_DIRECT',0
+traceSnapUnsupported db 'SNAP_METHOD=UNSUPPORTED',0
+traceSnapBios db 'SNAP_BIOS_MODE=',0
+traceSnapPixel  db 'SNAP_METHOD=GETPIXEL',0
 traceShutdown  db 'WAS_SHUTDOWN_REQUESTED',0
 traceFailure   db 'WAS_FAILURE',0
 traceAssertFail db 'WAS_ASSERT_FAILED',0
@@ -421,6 +429,9 @@ wasDispatch:
  lea di,cmdTARCLOSE
  call IsCommand
  jc commandTarClose
+ lea di,cmdSNAPSAFE
+ call IsCommand
+ jc commandSnap
  lea di,cmdSNAP
  call IsCommand
  jc commandSnap
@@ -1105,64 +1116,48 @@ commandSnap:
  lea si,wasInput
  lea di,wasSnapPath
  call CopyString260
- ; default full desktop and native desktop depth
+ ; All SNAP options are per-command. No mode leaks between instructions.
  mov word ptr wasRect,0FFFFh
  mov word ptr wasRect+2,0FFFFh
  mov word ptr wasRect+4,0FFFFh
  mov word ptr wasRect+6,0FFFFh
  mov wasBpp,0
+ mov wasSnapMode,1       ; SNAP defaults to strict FAST (no silent GDI fallback)
+wasSnapOption:
  mov si,wasNextSI
  call TrimSI
  cmp byte ptr [si],0
  je wasDoSnap
- ; Either four inclusive coordinates (X,Y,X1,Y1[,BPP]), or BPP=N.
- ; BPP=N alone captures the full desktop at the requested colour depth.
  call FetchArg
  lea si,wasInput
  mov al,[si]
  and al,0DFh
  cmp al,'B'
- je wasSnapCheckNamed
+ je wasSnapCheckBpp
+ cmp al,'M'
+ je wasSnapCheckMode
+ ; Numeric coordinates: X,Y,X1,Y1; optional legacy trailing BPP.
+ cmp word ptr wasRect,0FFFFh
+ jne wasSnapTrailingBpp
  xor bx,bx
- jmp wasSnapCoord
-wasSnapCheckNamed:
- mov al,[si+1]
- and al,0DFh
- cmp al,'P'
- jne wasCmdFailure
- mov al,[si+2]
- and al,0DFh
- cmp al,'P'
- jne wasCmdFailure
- cmp byte ptr [si+3],'='
- jne wasCmdFailure
- add si,4
- call ParseUInt
- jc wasCmdFailure
- mov wasBpp,ax
- jmp wasDoSnap
 wasSnapCoord:
  call ParseUInt
  jc wasCmdFailure
  mov wasRect[bx],ax
  add bx,2
-wasSnapNext:
  cmp bx,8
- jae wasSnapBpp
+ jae wasSnapOption
  call FetchArg
  lea si,wasInput
  jmp wasSnapCoord
-wasSnapBpp:
- mov si,wasNextSI
- call TrimSI
- cmp byte ptr [si],0
- je wasDoSnap
- call FetchArg
- lea si,wasInput
- mov al,[si]
- and al,0DFh
- cmp al,'B'
- jne wasSnapRawBpp
+wasSnapTrailingBpp:
+ cmp wasBpp,0
+ jne wasCmdFailure
+ call ParseUInt
+ jc wasCmdFailure
+ mov wasBpp,ax
+ jmp wasSnapOption
+wasSnapCheckBpp:
  mov al,[si+1]
  and al,0DFh
  cmp al,'P'
@@ -1174,15 +1169,75 @@ wasSnapBpp:
  cmp byte ptr [si+3],'='
  jne wasCmdFailure
  add si,4
-wasSnapRawBpp:
  call ParseUInt
  jc wasCmdFailure
  mov wasBpp,ax
+ jmp wasSnapOption
+wasSnapCheckMode:
+ mov al,[si+1]
+ and al,0DFh
+ cmp al,'O'
+ jne wasCmdFailure
+ mov al,[si+2]
+ and al,0DFh
+ cmp al,'D'
+ jne wasCmdFailure
+ mov al,[si+3]
+ and al,0DFh
+ cmp al,'E'
+ jne wasCmdFailure
+ cmp byte ptr [si+4],'='
+ jne wasCmdFailure
+ lea si,wasInput+5
+ lea di,snapModeFastName
+ call IsCommand
+ jc wasSnapFastSet
+ lea di,snapModeCompatName
+ call IsCommand
+ jc wasSnapCompatSet
+ lea di,snapModeAutoName
+ call IsCommand
+ jc wasSnapAutoSet
+ jmp wasCmdFailure
+wasSnapFastSet:
+ mov wasSnapMode,1
+ jmp wasSnapOption
+wasSnapCompatSet:
+ mov wasSnapMode,0
+ jmp wasSnapOption
+wasSnapAutoSet:
+ mov wasSnapMode,2
+ jmp wasSnapOption
 wasDoSnap:
+ ; SNAPSAFE unconditionally uses original GDI, even if MODE=FAST is passed.
+ lea si,wasCommand
+ lea di,cmdSNAPSAFE
+ call IsCommand
+ jnc wasSnapReady
+ mov wasSnapMode,0
+wasSnapReady:
  lea si,wasSnapPath
  lea di,wasInput
  call CopyString260
- call SnapDo             ; SNAP sets %RESULT% on success/failure
+ call SnapDo
+ lea si,traceSnapBios
+ call TraceText
+ xor ax,ax
+ mov al,snapVideoMode
+ call TraceHexLine
+ cmp snapMethod,3
+ je wasSnapTraceUnsupported
+ cmp snapMethod,2
+ je wasSnapTraceDirect
+ lea si,traceSnapPixel
+ jmp wasSnapTrace
+wasSnapTraceDirect:
+ lea si,traceSnapDirect
+ jmp wasSnapTrace
+wasSnapTraceUnsupported:
+ lea si,traceSnapUnsupported
+wasSnapTrace:
+ call TraceLine
  jmp wasLoop
 commandShutdown:
  ; Stop script processing; all files are flushed before closing Windows.
@@ -1675,7 +1730,7 @@ wasCheckWinVer:
  lea si,wasWord
  lea di,sysWINVER
  call EqualStrings
- jnc wasCheckScreenW
+ jnc wasCheckTime
  ; The only version field used for runtime feature gates is the major
  ; version reported by KERNEL.GetVersion (1/2/3 for current targets).
  ; In particular, Windows 1.01's GetVersion returns 0001h, NOT 0101h.
@@ -1689,6 +1744,70 @@ wasCheckWinVer:
  xor ah,ah
  call FormatDecimal
  jmp wasBuiltInReady
+wasCheckTime:
+ ; DOS 2Ch evaluated at EVERY interpolation, not a cached startup time.
+ lea si,wasWord
+ lea di,sysTIME
+ call EqualStrings
+ jnc wasCheckDate
+ mov ah,2Ch
+ call Dos3Call
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ lea di,wasClockResult
+ mov al,ch                 ; hours, 0..23
+ call WriteTwoDigits
+ mov al,':'
+ stosb
+ mov al,cl                 ; minutes, 0..59
+ call WriteTwoDigits
+ mov al,':'
+ stosb
+ mov al,dh                 ; seconds, 0..59
+ call WriteTwoDigits
+ xor al,al
+ stosb
+ jmp wasClockBuilt
+wasCheckDate:
+ ; DOS 2Ah, YYYY-MM-DD. All arithmetic is 8086 unsigned 16-bit.
+ lea si,wasWord
+ lea di,sysDATE
+ call EqualStrings
+ jnc wasCheckScreenW
+ mov ah,2Ah
+ call Dos3Call
+ push dx                   ; preserve DH=month and DL=day
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ lea di,wasClockResult
+ mov ax,cx                 ; 4-digit year
+ mov cx,100
+ xor dx,dx
+ div cx                     ; AX=century, DX=year remainder
+ push dx
+ call WriteTwoDigits
+ pop dx
+ mov al,dl
+ call WriteTwoDigits
+ mov al,'-'
+ stosb
+ pop dx
+ mov al,dh                 ; month
+ call WriteTwoDigits
+ mov al,'-'
+ stosb
+ mov al,dl                 ; day
+ call WriteTwoDigits
+ xor al,al
+ stosb
+wasClockBuilt:
+ mov bx,offset wasClockResult
+ clc
+ jmp wasFindDone
 wasCheckScreenW:
  ; EqualStrings advances SI on a partial match (SCREENW vs SCREENH).
  lea si,wasWord
@@ -1920,6 +2039,8 @@ StoreVar proc near
  ; SET WINVER=..., SET BPP=..., SET DISKFREE(C)=..., etc. are no-ops.
  cmp bx,offset wasNumResult
  je wasStoreDone
+ cmp bx,offset wasClockResult
+ je wasStoreDone
  jmp wasExistingVar
 wasStoreNewVar:
  mov ax,wasVarCount
@@ -1990,6 +2111,23 @@ FormatResult proc near
  mov ax,wasResult
  jmp FormatDecimal
 FormatResult endp
+
+ ; AL=0..99, append two ASCII digits at ES:DI; preserves AL/BX.
+WriteTwoDigits proc near
+ push ax
+ push bx
+ xor ah,ah
+ mov bl,10
+ div bl
+ add al,'0'
+ stosb
+ mov al,ah
+ add al,'0'
+ stosb
+ pop bx
+ pop ax
+ ret
+WriteTwoDigits endp
 
 FormatDecimal proc near
  push ax
@@ -2309,6 +2447,10 @@ cmdTARCREATE db 'TARCREATE',0
 cmdTARADD    db 'TARADD',0
 cmdTARCLOSE  db 'TARCLOSE',0
 cmdSNAP      db 'SNAP',0
+cmdSNAPSAFE  db 'SNAPSAFE',0
+snapModeFastName db 'FAST',0
+snapModeCompatName db 'COMPAT',0
+snapModeAutoName db 'AUTO',0
 cmdSHUTDOWN  db 'SHUTDOWN',0
 cmdPASS      db 'PASS',0
 cmdFAIL      db 'FAIL',0
@@ -2317,6 +2459,8 @@ opEQ         db 'EQ',0
 opASSIGN     db '=',0
 opNE         db 'NE',0
 opDIFF       db '<>',0
+sysTIME      db 'TIME',0
+sysDATE      db 'DATE',0
 sysERRORCODE db 'ERRORCODE',0
 sysRESULT    db 'RESULT',0
 sysWINVER    db 'WINVER',0

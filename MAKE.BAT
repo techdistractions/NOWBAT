@@ -32,10 +32,15 @@ echo Building NOWBAT for Windows 1/2 and Windows 3 real mode...
 if errorlevel 1 goto fail
 "%ASM%" -0 -omf -DWAS_WIN300=1 -FoBUILD\WAS300.OBJ SRC\WAS.ASM
 if errorlevel 1 goto fail
-for %%M in (WASTAR WASFS WASSNAP WASUI) do (
+for %%M in (WASTAR WASFS WASUI) do (
  "%ASM%" -0 -omf -FoBUILD\%%M.OBJ SRC\%%M.ASM
  if errorlevel 1 goto fail
 )
+rem SNAP is built separately for Windows 1/2 and Windows 3.
+"%ASM%" -0 -omf -FoBUILD\WASSNAP101.OBJ SRC\WASSNAP.ASM
+if errorlevel 1 goto fail
+"%ASM%" -0 -omf -DWAS_WIN300=1 -FoBUILD\WASSNAP300.OBJ SRC\WASSNAP.ASM
+if errorlevel 1 goto fail
 "%LINKER%" @LINK\WIN101.RSP
 if errorlevel 1 goto fail
 "%LINKER%" @LINK\WIN300.RSP

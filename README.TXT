@@ -1,38 +1,37 @@
 NOWBAT - WINDOWS SCRIPT RUNNER
 ==============================
 
-NOWBAT runs simple scripts inside Windows 1.01, Windows 2.x and Windows
-3.0 real mode on 8086/8088-compatible computers.
+NOWBAT runs scripts inside Windows 1.01, Windows 2.x and Windows 3.0
+real mode on 8086/8088-compatible computers.
 
-Use WIN101\NOWBAT.EXE with Windows 1/2, and WIN300\NOWBAT.EXE with
+Use WIN101\NOWBAT.EXE with Windows 1/2 and WIN300\NOWBAT.EXE with
 Windows 3.0 real mode (start Windows with WIN /R).
 
-From inside Windows, run:
+Launch inside Windows with a script file:
 
     NOWBAT.EXE HELLO.WAS
 
-Example HELLO.WAS:
+Example:
 
     ShowIcon=YES
     LOGFILE "HELLO.LOG"
-    LOG "Hello from NOWBAT"
+    LOG "Started %DATE% %TIME%"
     WAIT 2000
     LOGCLOSE
     END
 
-NOWBAT supports logging, variables, control flow, application launches,
-file and directory operations, BMP screen captures and TAR archives.
-Refer to SCRIPT.TXT for commands and EXAMPLES for sample scripts.
+SNAP "SCREEN.BMP" captures the entire desktop at its current colour
+depth using the fast graphics-memory method on supported displays.
+SNAPSAFE "SCREEN.BMP" uses the slower GDI method for compatibility.
+Both commands accept optional BPP and region arguments; see SCRIPT.TXT.
+Unsupported FAST captures report RESULT=2.
 
-END closes NOWBAT but leaves Windows running. SHUTDOWN requests Windows
-shutdown and may open a confirmation dialog. SHELL and SHELLWAIT start
-Windows NE applications, not DOS programs. WAIT accepts 0-59000 ms.
-Up to eight user variables and four nested GOSUB calls are supported.
-Use DOS-compatible paths and 8.3 names when possible. NOWBAT cannot
-inject mouse movement or keystrokes.
+NOWBAT also supports variables, branching, application launches, file
+operations, logging and TAR archives. END closes NOWBAT without closing
+Windows. SHUTDOWN requests a Windows session exit. Use DOS-style paths
+and 8.3 filenames for best compatibility.
 
-To build from source, install JWASM, NBJWLINK and Python 3 on a Windows
-build PC, then run MAKE.BAT. The linker creates Windows 1/2 and Windows
-3.0 real-mode executables. See README.md in the source package for setup details.
+To build, install JWASM, NBJWLINK and Python 3 on a Windows PC, then
+run MAKE.BAT. See README.md in the source ZIP for details.
 
 The Unlicense. See LICENSE.
