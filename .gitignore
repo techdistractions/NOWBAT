@@ -1,4 +1,4 @@
-# Generated files and local machine configuration
+# Local build output and tool configuration
 BUILD/
 DIST/
 TOOLS/
@@ -9,16 +9,3 @@ TOOLS/
 *.pyc
 __pycache__/
 MAKE.LOCAL.BAT
-
-# Private development configuration and UAT output
-UAT/
-OUTPUT.ZIP
-RESULT.JSON
-*.LOCAL.BAT
-*.LOCAL.CMD
-
-# Native command-matrix output and local audit configuration
-AUTOUAT/
-AUTOUAT_OUTPUT.ZIP
-TESTS/*.LOCAL
-*.LOCAL

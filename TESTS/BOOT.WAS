@@ -1,8 +1,0 @@
-# Minimal Win2 startup/Win16 icon and menu diagnostic (not qualification).
-LOGFILE "C:\WASUAT\BOOT.LOG"
-LOG "WAS_BOOT_OK=@RUN@"
-ShowIcon=YES
-ASSERT %RESULT% EQ 0
-WAIT 2000
-ShowIcon=NO
-SHUTDOWN

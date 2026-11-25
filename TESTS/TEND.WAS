@@ -1,7 +1,0 @@
-# AutoUAT END isolated child, no session shutdown.
-LOGFILE "TERMEND.LOG"
-LOG "TERMEND=@RUN@"
-LOGCLOSE
-END
-# Should never reach this command: would terminate Windows.
-SHUTDOWN

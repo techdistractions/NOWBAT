@@ -1,7 +1,0 @@
-# AutoUAT FAIL isolated child, no session shutdown.
-LOGFILE "TERMFAIL.LOG"
-LOG "TERMFAIL=@RUN@"
-LOGCLOSE
-FAIL
-# Should never reach this command: would terminate Windows.
-SHUTDOWN
