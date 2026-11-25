@@ -1,64 +1,58 @@
-# NOWBAT
+# NOWBAT 0.0.54
 
-NOWBAT is a lightweight script runner for **Windows 1.01, Windows 2.x and Windows 3.0 real mode**, including 8086/8088-based PCs. It can launch Windows applications, work with files and directories, log results, take desktop BMP screenshots and create uncompressed TAR archives.
+A lightweight Windows automation script runner for Windows 1.01, Windows 2.x and Windows 3.0 real mode on 8086/8088-compatible PCs. Run applications, synchronize with windows and files, automate mouse and keyboard input, capture BMP screenshots, and collect evidence in uncompressed TAR archives.
 
 ## Run
 
-Use `WIN101\NOWBAT.EXE` on Windows 1.01 or 2.x and `WIN300\NOWBAT.EXE` on Windows 3.0 real mode (`WIN /R`). Start NOWBAT **inside Windows** with a `.WAS` script:
+Use `WIN101\NOWBAT.EXE` under Windows 1.01/2.x and `WIN300\NOWBAT.EXE` under Windows 3.0 real mode (`WIN /R`). Launch NOWBAT **inside Windows** with a `.WAS` script, e.g. `NOWBAT.EXE HELLO.WAS`. See [SCRIPT.TXT](SCRIPT.TXT) for the full language reference, [EXAMPLES](EXAMPLES) for sample scripts and [HISTORY.TXT](HISTORY.TXT) for version history.
+
+## GUI automation
+
+GUI commands use native Windows input callbacks rather than fabricated window messages. Select a window by its unique caption, focus it, and use relative client coordinates or absolute screen coordinates. For example, adapt the caption and coordinates to your own application:
 
 ```text
-NOWBAT.EXE HELLO.WAS
-```
-
-For example:
-
-```text
-ShowIcon=YES
-LOGFILE "HELLO.LOG"
-LOG "Started at %DATE% %TIME%"
-WAIT 2000
-LOGCLOSE
+WAITFOR WINDOW "My Application" TIMEOUT 15000
+IF %RESULT% NE 0 THEN GOTO FAILED
+WINDOWFOCUS "My Application"
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSEMOVE REL,20,20
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSECLICK LEFT
+IF %RESULT% NE 0 THEN GOTO FAILED
+TYPE "Hello World!"
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYCOMBO CTRL+S
+IF %RESULT% NE 0 THEN GOTO FAILED
+RELEASEINPUT
+END
+:FAILED
+RELEASEINPUT
 END
 ```
 
-See `SCRIPT.TXT` for the current commands and `EXAMPLES` for ready-to-run scripts.
+`DOEVENTS` lets other Windows applications process queued events. `WAITFOR FILE` and `WAITFOR WINDOW` provide bounded readiness checks. Mouse down/up, double-click and held-button movement support drag operations. Keyboard commands include `KEYDOWN`, `KEYUP`, `KEYPRESS`, `KEYCOMBO` and `TYPE` (US printable ASCII, Caps Lock off). Use `RELEASEINPUT` to recover script-held keys and buttons. Check `%RESULT%` and `%ERRORCODE%`, and verify the application's actual state rather than relying on successful injection alone.
 
 ## Capture screenshots
 
-`SNAP` takes a fast direct-video-memory BMP capture on supported display modes, using the full desktop and its detected colour depth unless you specify a region or `BPP`:
+`SNAP` uses fast direct-video capture on supported modes; `SNAPSAFE` uses the slower GDI compatibility path. Both accept the same syntax:
 
 ```text
 SNAP "SCREEN.BMP"
 SNAP "SCREEN.BMP" BPP=4
 SNAP "PART.BMP",0,0,319,199,BPP=4
-```
-
-`SNAPSAFE` uses the slower GDI-based method when the active display driver or graphics mode is not supported by direct capture. It accepts the same filename, region and `BPP` arguments:
-
-```text
 SNAPSAFE "SCREEN.BMP"
 ```
 
-An unsupported fast capture returns `%RESULT%=2`, rather than silently falling back. Supported FAST region captures require an eight-pixel-aligned X position and width. Check `%RESULT%` before using the BMP.
-
-`%TIME%` and `%DATE%` return the live DOS clock (`HH:MM:SS`) and date (`YYYY-MM-DD`) whenever expanded, including in log messages.
+FAST returns `%RESULT%=2` for unsupported modes instead of silently falling back. FAST region X and width must be divisible by eight. See [capture notes](DOCS/SNAP_MODES.TXT) for limitations.
 
 ## Build from source
 
-Building requires **[JWASM](https://github.com/JWasm/JWasm)** (8086 assembler), **[NBJWLINK](https://github.com/techdistractions/NBJWLINK)** (Win16 NE linker) and Python 3 for icon insertion and ZIP packaging. These are host-side build tools; none is included in NOWBAT or required to run its binaries.
+On a Windows build PC, install [JWASM](https://github.com/JWasm/JWasm), [NBJWLINK](https://github.com/techdistractions/NBJWLINK) and Python 3. Put the tools on PATH or in `TOOLS`, or configure `JWASM_EXE` and `NBJWLINK_EXE` in a private `MAKE.LOCAL.BAT`. Run `MAKE` to build both targets. The executables are in `DIST/WIN101` and `DIST/WIN300`. See [DEVELOPMENT.TXT](DEVELOPMENT.TXT) for contributor instructions.
 
-Put `JWASM.EXE` and `NBJWLINK.EXE` on `PATH`, place them in a local `TOOLS` folder, or set `JWASM_EXE` and `NBJWLINK_EXE` (for example in an optional `MAKE.LOCAL.BAT` next to `MAKE.BAT`). The build does not depend on a particular drive or directory.
+## Compatibility and limits
 
-From the source directory, run:
+GUI automation has been tested with Windows 1.01, 2.x and 3.0 real mode in DOSBox-X. Compatibility with every physical PC, display driver and keyboard layout is not guaranteed. `TYPE` assumes a US keyboard layout and Caps Lock off.
 
-```bat
-MAKE
-```
+One script runs at a time; up to eight variables and four nested GOSUB calls. `WAIT` accepts 0–59,000 ms. `SHELL`/`SHELLWAIT` launch Windows NE programs, not DOS applications, and do not return a DOS ERRORLEVEL. `END` leaves Windows running; `SHUTDOWN` asks Windows to exit.
 
-This builds `DIST\WIN101\NOWBAT.EXE` and `DIST\WIN300\NOWBAT.EXE` and creates `DIST\NOWBAT_SOURCE.ZIP` and `DIST\NOWBAT_BINARIES.ZIP`. The source ZIP contains only public project files.
-
-## Limits and licence
-
-NOWBAT runs one script at a time. `SHELL` and `SHELLWAIT` start Windows NE programs, not DOS applications, and do not return a DOS `ERRORLEVEL`. `WAIT` accepts 0–59,000 milliseconds. The interpreter supports up to eight user variables and four nested `GOSUB` calls. NOWBAT does not inject mouse movement or keystrokes. `END` stops NOWBAT without ending the Windows session; `SHUTDOWN` asks Windows to exit.
-
-Released under [The Unlicense](LICENSE). Windows files and external build tools are not bundled.
+Released under [The Unlicense](LICENSE). Windows installations and external build tools are not included.

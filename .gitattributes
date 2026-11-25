@@ -1,0 +1,9 @@
+*.ASM text eol=crlf
+*.BAT text eol=crlf
+*.RSP text eol=crlf
+*.WAS text eol=crlf
+*.TXT text eol=crlf
+*.md text eol=lf
+*.PY text eol=lf
+*.EXE binary
+*.ZIP binary

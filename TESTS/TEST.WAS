@@ -1,0 +1,161 @@
+# One real Win16 run per target: delay 5 seconds, capture full desktop.
+# C:\WASUAT is replaced with a private DOS 8.3 staging directory.
+# Closed marker files let the host measure the true WAIT interval.
+# They stay OUTSIDE EVIDENCE.TAR, which retains exactly LOG + BMP.
+# Dedicated native DOS filesystem tests run in the same three guests.
+# No extra Windows boots, large fixtures, or emulator sessions.
+# 0.0.23: opt-in native minimized icon and DOS control-flow qualification.
+# Default remains headless. This icon will be visible in the 4-bpp SNAP.
+ShowIcon=YES
+ASSERT %RESULT% EQ 0
+SET FLOW=READY
+IF %FLOW% EQ READY THEN GOTO CF_READY
+FAIL
+:CF_READY
+IF %FLOW% NE BAD THEN GOTO CF_TEST
+FAIL
+:CF_TEST
+# Read-only built-in variables expand just like SET vars, even inside IF.
+# A SET attempt must not overwrite the live Windows or device value.
+SET WINVER=99
+SET SCREENW=0
+SET DISKFREE(C)=0
+# Write real guest values BEFORE branch decisions; host must independently
+# validate this file. If IF fails, OUTPUT.ZIP still has the exact values.
+LOGFILE "C:\WASUAT\ENV.LOG"
+LOG "WINVER=%WINVER%"
+LOG "SCREENW=%SCREENW%"
+LOG "SCREENH=%SCREENH%"
+LOG "BPP=%BPP%"
+LOG "DISKFREE(C)=%DISKFREE(C)%"
+LOGCLOSE
+LOGFILE "C:\WASUAT\CONTROL.LOG"
+LOG "IF_EQ_NE_OK=@RUN@"
+IF %WINVER% EQ 99 THEN GOTO CF_ENV_BAD
+IF %WINVER% EQ 0 THEN GOTO CF_ENV_BAD
+IF %SCREENW% EQ 0 THEN GOTO CF_ENV_BAD
+IF %SCREENH% EQ 0 THEN GOTO CF_ENV_BAD
+IF %BPP% EQ 0 THEN GOTO CF_ENV_BAD
+IF %DISKFREE(C)% EQ 0 THEN GOTO CF_ENV_BAD
+LOG "ENV_IF_OK=@RUN@"
+GOTO CF_ENV_GOOD
+:CF_ENV_BAD
+LOG "ENV_IF_FAILED=@RUN@"
+SHUTDOWN
+:CF_ENV_GOOD
+GOSUB CF_SUB
+SHELL "WCHILD.EXE"
+ASSERT %RESULT% EQ 0
+LOG "SHELL_LAUNCH_OK=@RUN@"
+# On Win1/2 do NOT wait for the first asynchronous child to exit. Win1.01
+# can unload a module differently when that task is the only live child.
+# Save a closed checkpoint proving that WAS resumed after SHELL immediately.
+# SHELLWAIT must use a separately linked NE module, not a second instance
+# of WCHILD.EXE. This avoids shared-module usage-count ambiguity.
+COPY "TEST.WAS" "C:\WASUAT\BEFORE.OK"
+ASSERT %RESULT% EQ 0
+# Win3's delayed asynchronous child must have its own closed witness before
+# starting another delayed child or changing DOS cwd. BEFORE.OK above still
+# proves SHELL returned before this explicit cooperative synchronization.
+# Win1/2 preserve their established no-prewait launch sequence.
+IF %WINVER% NE 3 THEN GOTO CF_WAIT_CHILD
+WAITFOR FILE "WCHILD.OK" TIMEOUT 15000
+ASSERT %RESULT% EQ 0
+:CF_WAIT_CHILD
+SHELLWAIT "WWAIT.EXE" "ALPHA BETA" GAMMA
+ASSERT %RESULT% EQ 0
+ASSERT %ERRORCODE% EQ 0
+COPY "TEST.WAS" "C:\WASUAT\AFTER.OK"
+ASSERT %RESULT% EQ 0
+EXISTS "WWAIT.OK"
+ASSERT %RESULT% EQ 0
+LOG "SHELLWAIT_WIN16_OK=@RUN@"
+# Missing-file negative case MUST return without Win2's Change Disk prompt.
+SHELL "NOAPP.EXE"
+ASSERT %RESULT% NE 0
+ASSERT %ERRORCODE% NE 0
+LOG "SHELL_ERROR_OK=@RUN@"
+GOTO CF_END
+:CF_SUB
+LOG "GOSUB_RETURN_OK=@RUN@"
+RETURN
+:CF_END
+LOGCLOSE
+LOGFILE "C:\WASUAT\FS.LOG"
+MKDIR "C:\WASUAT\FS"
+ASSERT %RESULT% EQ 0
+MKDIR "C:\WASUAT\FS\EMPTY"
+ASSERT %RESULT% EQ 0
+COPY "TEST.WAS" "C:\WASUAT\FS\ORIG.TXT"
+ASSERT %RESULT% EQ 0
+REN "C:\WASUAT\FS\ORIG.TXT" "C:\WASUAT\FS\REN.TXT"
+ASSERT %RESULT% EQ 0
+MOVE "C:\WASUAT\FS\REN.TXT" "C:\WASUAT\FS\MOVED.TXT"
+ASSERT %RESULT% EQ 0
+EXISTS "C:\WASUAT\FS\MOVED.TXT"
+ASSERT %RESULT% EQ 0
+COPY "C:\WASUAT\FS\MOVED.TXT" "C:\WASUAT\FS\DEL.TXT"
+ASSERT %RESULT% EQ 0
+DEL "C:\WASUAT\FS\DEL.TXT"
+ASSERT %RESULT% EQ 0
+EXISTS "C:\WASUAT\FS\DEL.TXT"
+ASSERT %RESULT% NE 0
+DIR "C:\WASUAT\FS\*.TXT"
+ASSERT %RESULT% EQ 0
+LOG "FS_DIR_OK=@RUN@"
+CHDIR "C:\WASUAT\FS"
+ASSERT %RESULT% EQ 0
+PWD
+ASSERT %RESULT% EQ 0
+CHDIR "C:\WASUAT"
+ASSERT %RESULT% EQ 0
+RMDIR "C:\WASUAT\FS\EMPTY"
+ASSERT %RESULT% EQ 0
+# Negative I/O cases must be visible to scripts, never terminate WAS.
+COPY "C:\WASUAT\FS\MISSING.X" "C:\WASUAT\FS\BAD.TXT"
+ASSERT %RESULT% NE 0
+ASSERT %ERRORCODE% NE 0
+LOG "FS_ALL_OK=@RUN@"
+# CHDIR leaves the process in GUEST, not the WIN directory holding TEST.WAS.
+# Test absolute file resolution here; relative TEST.WAS would false-fail.
+LOGCLOSE
+EXISTS "C:\WASUAT\FS\MOVED.TXT"
+ASSERT %RESULT% EQ 0
+EXISTS "C:\WASUAT\NOFILE.XYZ"
+ASSERT %RESULT% NE 0
+LOGFILE "C:\WASUAT\WSTART.OK"
+LOG "WAIT_BEGIN=@RUN@"
+LOGCLOSE
+WAIT 5000
+IF %RESULT% NE 0 THEN GOTO BAD_CLOSED
+LOGFILE "C:\WASUAT\WEND.OK"
+LOG "WAIT_DONE=@RUN@"
+LOGCLOSE
+LOGFILE "C:\WASUAT\DESKTOP.LOG"
+LOG "WAS_RUN=@RUN@"
+LOG "WAIT_BEGIN=@RUN@"
+LOG "WAIT_DONE=@RUN@"
+SNAPSAFE "C:\WASUAT\DESKTOP.BMP" BPP=4
+IF %RESULT% NE 0 THEN GOTO BAD
+EXISTS "C:\WASUAT\DESKTOP.BMP"
+ASSERT %RESULT% EQ 0
+LOG "CHECKS_OK=@RUN@"
+LOG "SNAP_OK_4BPP=@RUN@"
+LOG "EVIDENCE_READY=@RUN@"
+LOGCLOSE
+TARCREATE "C:\WASUAT\EVIDENCE.TAR"
+IF %RESULT% NE 0 THEN GOTO BAD_CLOSED
+TARADD "C:\WASUAT\DESKTOP.LOG"
+IF %RESULT% NE 0 THEN GOTO BAD_CLOSED
+TARADD "C:\WASUAT\DESKTOP.BMP"
+IF %RESULT% NE 0 THEN GOTO BAD_CLOSED
+TARCLOSE
+IF %RESULT% NE 0 THEN GOTO BAD_CLOSED
+ShowIcon=NO
+ASSERT %RESULT% EQ 0
+SHUTDOWN
+:BAD
+LOG "WAS_UAT_FAIL=@RUN@"
+LOGCLOSE
+:BAD_CLOSED
+SHUTDOWN

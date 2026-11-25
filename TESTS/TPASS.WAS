@@ -1,0 +1,7 @@
+# AutoUAT PASS isolated child, no session shutdown.
+LOGFILE "TERMPASS.LOG"
+LOG "TERMPASS=@RUN@"
+LOGCLOSE
+PASS
+# Should never reach this command: would terminate Windows.
+SHUTDOWN

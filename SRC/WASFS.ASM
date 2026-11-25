@@ -47,7 +47,7 @@ fsSourceH   dw 0FFFFh            ; open source, or FFFFh when closed
 fsDestH     dw 0FFFFh            ; open destination, or FFFFh when closed
 fsLastError dw 0                ; survives DOS close/unlink cleanup
 fsMode      db 0                ; 0=COPY, 1=REN, 2=MOVE
-fsDta       db 43 dup(0)        ; DOS findfirst DTA: name at +30
+extrn fsDta:byte ; DOS findfirst DTA: name at +30
 fsOldDta    dw 0,0              ; old offset, segment
 
 .code

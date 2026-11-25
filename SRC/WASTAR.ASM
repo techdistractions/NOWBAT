@@ -10,13 +10,13 @@ PUBLIC TarCreate,TarAdd,TarClose
 .data
 tarHandle   dw 0FFFFh
 tarReadH    dw 0FFFFh
-tarSource   db 260 dup(0)
-tarPrefix   db 130 dup(0)
-tarName     db 100 dup(0)
-tarDTA      db 43 dup(0)
+extrn tarSource:byte ; storage in final zero arena (WASUI.ASM)
+extrn tarPrefix:byte ; storage in final zero arena (WASUI.ASM)
+extrn tarName:byte ; storage in final zero arena (WASUI.ASM)
+extrn tarDTA:byte ; storage in final zero arena (WASUI.ASM)
 tarOldDTA   dw 0,0
-tarHeader   db 512 dup(0)
-tarBuffer   db 1024 dup(0)  ; 2x I/O throughput without large DGROUP cost
+extrn tarHeader:byte ; storage in final zero arena (WASUI.ASM)
+extrn tarBuffer:byte ; 2x I/O throughput without large DGROUP cost
 tarWriteBytes dw 0
 tarBytes    dw 0
 tarSizeLo   dw 0

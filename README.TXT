@@ -1,37 +1,49 @@
-NOWBAT - WINDOWS SCRIPT RUNNER
+NOWBAT 0.0.54 - WINDOWS SCRIPT RUNNER
 ==============================
 
-NOWBAT runs scripts inside Windows 1.01, Windows 2.x and Windows 3.0
-real mode on 8086/8088-compatible computers.
-
-Use WIN101\NOWBAT.EXE with Windows 1/2 and WIN300\NOWBAT.EXE with
-Windows 3.0 real mode (start Windows with WIN /R).
-
-Launch inside Windows with a script file:
+NOWBAT runs simple automation scripts under Windows 1.01, Windows 2.x, and
+Windows 3.0 real mode. Use WIN101\NOWBAT.EXE for Windows 1/2 and
+WIN300\NOWBAT.EXE for Windows 3. Start it from WITHIN Windows, giving
+it the name of a .WAS script:
 
     NOWBAT.EXE HELLO.WAS
 
-Example:
+HELLO.WAS:
 
     ShowIcon=YES
     LOGFILE "HELLO.LOG"
-    LOG "Started %DATE% %TIME%"
+    LOG "Hello from NOWBAT"
     WAIT 2000
     LOGCLOSE
     END
 
-SNAP "SCREEN.BMP" captures the entire desktop at its current colour
-depth using the fast graphics-memory method on supported displays.
-SNAPSAFE "SCREEN.BMP" uses the slower GDI method for compatibility.
-Both commands accept optional BPP and region arguments; see SCRIPT.TXT.
-Unsupported FAST captures report RESULT=2.
+Supported tasks: file/directory operations, variables and branches,
+logging, Windows application launch/wait, BMP screenshots, TAR archives,
+window selection and native mouse/keyboard automation.
+Read SCRIPT.TXT for syntax, EXAMPLES for samples and HISTORY.TXT for changes.
 
-NOWBAT also supports variables, branching, application launches, file
-operations, logging and TAR archives. END closes NOWBAT without closing
-Windows. SHUTDOWN requests a Windows session exit. Use DOS-style paths
-and 8.3 filenames for best compatibility.
+IMPORTANT
+---------
+END exits NOWBAT; Windows stays open. SHUTDOWN requests that Windows quit
+and may present a confirmation dialog. ASSERT failure also requests a
+Windows shutdown. SHELL and SHELLWAIT launch Win16 applications only,
+not DOS programs; they do not provide a DOS child exit code.
 
-To build, install JWASM, NBJWLINK and Python 3 on a Windows PC, then
-run MAKE.BAT. See README.md in the source ZIP for details.
+WAIT supports 0-59000 milliseconds. Up to eight variables and four nested
+GOSUB calls are supported. Quote paths containing spaces, and use DOS 8.3
+filenames where possible. Screenshots are BMP; TAR output is uncompressed.
+NOWBAT supports native mouse and keyboard automation, window selection,
+window readiness, KEYCOMBO and TYPE (US printable ASCII). See SCRIPT.TXT.
 
-The Unlicense. See LICENSE.
+BUILDING FROM SOURCE
+--------------------
+On a Windows build PC, install JWASM (assembler) and NBJWLINK (16-bit
+Windows executable linker), plus Python 3 for icons and ZIP creation.
+Run MAKE.BAT in the source directory. See README.md and DEVELOPMENT.TXT.
+These build tools are NOT needed to run NOWBAT.
+
+GUI automation tested in DOSBox-X on Windows 1/2/3 real mode.
+Other drivers, layouts and physical hardware may behave differently.
+Check RESULT and ERRORCODE after automation operations.
+
+License: The Unlicense. See LICENSE.

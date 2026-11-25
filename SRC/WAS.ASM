@@ -1,4 +1,4 @@
-; NOWBAT 0.0.47: compact Windows Automated Scripting runtime (8088 baseline).
+; NOWBAT 0.0.54: compact Windows Automated Scripting runtime (8088 baseline).
 ; Tiny 8086 Win16 interpreter; native evidence is required for runtime PASS.
 ; The executor is intentionally line-at-a-time. GOTO scans the script on disk.
 .8086
@@ -9,9 +9,10 @@ extrn InitTask:far
 extrn WaitEvent:far
 extrn InitApp:far
 extrn GetVersion:far
-PUBLIC Dos3Call,wasLHS,wasLine,wasErrorCode,LogLine,EqualStrings
+PUBLIC Dos3Call,wasErrorCode,LogLine,EqualStrings
 PUBLIC wasInst,wasStop
 extrn UiOpen:near,UiClose:near,UiPump:near
+extrn WasZeroStart:byte,WasZeroEnd:byte
 extrn uiFailStage:byte
 extrn uiPumpAny:byte
 extrn Yield:far
@@ -23,6 +24,22 @@ extrn WaitMessage:far    ; USER.112, cooperative wait until message
 ENDIF
 extrn LoadModule:far        ; KERNEL.45: early Win16 application loader
 extrn GetModuleUsage:far    ; KERNEL.48: query child Win16 module lifetime
+extrn GetModuleHandle:far
+extrn GetProcAddress:far
+extrn SetActiveWindow:far
+extrn GetActiveWindow:far
+IFDEF WAS_WIN300
+extrn GetMouseEventProc:far
+ENDIF
+extrn SetCursorPos:far    ; USER.70: Win16 absolute desktop cursor
+extrn GetCursorPos:far    ; USER.17: FAR POINT pointer
+extrn EnumWindows:far ; USER.54
+extrn GetWindowText:far ; USER.36
+extrn IsWindow:far ; USER.47
+extrn GetClientRect:far ; USER.33
+extrn ClientToScreen:far ; USER.28
+extrn MakeProcInstance:far ; KERNEL.51
+extrn FreeProcInstance:far ; KERNEL.52
 extrn GetDC:far           ; USER.66: desktop device context
 extrn ReleaseDC:far      ; USER.68
 extrn GetDeviceCaps:far  ; GDI.80: horizontal/vertical pixels and bit planes
@@ -47,8 +64,8 @@ extrn FsPwd:near
 
 .data
  dw 0,0,5,0,0,0,0,0      ; original Win1/Win2 automatic DGROUP prefix
-PUBLIC wasInput,wasResult,wasIo,wasRect,wasBpp,wasSnapMode
-wasInput       db 260 dup(0)
+PUBLIC wasResult,wasIo,wasRect,wasBpp,wasSnapMode
+extrn wasInput:byte ; storage in final zero arena (WASUI.ASM)
 wasResult      dw 0
 wasErrorCode   dw 0
 wasIo          dw 0FFFFh
@@ -57,28 +74,28 @@ wasBpp         dw 0
 wasSnapMode    db 0     ; 0=COMPAT, 1=FAST (SNAP default), 2=AUTO
 wasInst        dw 0
 wasDefault     db 'WAS.WAS',0
-wasScript      db 128 dup(0)
-wasLine        db 260 dup(0)
+extrn wasScript:byte ; storage in final zero arena (WASUI.ASM)
+extrn wasLine:byte ; storage in final zero arena (WASUI.ASM)
 wasCommand     db 24 dup(0)
-wasArg         db 260 dup(0)
-wasWord        db 32 dup(0)
-wasLHS         db 260 dup(0)
+extrn wasArg:byte ; storage in final zero arena (WASUI.ASM)
+extrn wasWord:byte ; storage in final zero arena (WASUI.ASM)
+extrn wasLHS:byte ; storage in final zero arena (WASUI.ASM)
 wasOp          db 16 dup(0)
-wasRHS         db 260 dup(0)
+extrn wasRHS:byte ; storage in final zero arena (WASUI.ASM)
 wasCharacter   db 0
 wasScriptH     dw 0FFFFh
 wasLineNo      dw 0
 wasNextSI      dw 0
 wasSubDepth    dw 0
 wasSubs        dw 8 dup(0)  ; 4 caller offsets, low/high pairs
-wasLabel       db 32 dup(0)
-wasVarNames    db 128 dup(0)  ; 8 x 16
-wasVarValues   db 768 dup(0)  ; 8 x 96
+extrn wasLabel:byte ; storage in final zero arena (WASUI.ASM)
+extrn wasVarNames:byte ; 8 x 16
+extrn wasVarValues:byte ; 8 x 96
 wasVarCount    dw 0
 wasNumResult   db 12 dup(0) ; decimal WORD/DWORD output, shared by built-in vars
 wasClockResult db 16 dup(0) ; DATE YYYY-MM-DD or TIME HH:MM:SS (live DOS clock)
 wasSetTarget   db 16 dup(0)
-wasSnapPath    db 260 dup(0)
+extrn wasSnapPath:byte ; storage in final zero arena (WASUI.ASM)
 wasCRLF        db 13,10
 wasLogPath     db 'WAS.LOG',0
 ; Win16 KERNEL.45 LoadModule parameter block (14 bytes, not a DOS EXEC
@@ -86,7 +103,7 @@ wasLogPath     db 'WAS.LOG',0
 ; DWORD reserved. NOWBAT's proven Windows 1.x launcher uses this layout.
 ; The command tail is length-prefixed and NUL-terminated; the show block
 ; contains two WORDs: byte length=2 and SW_SHOWNORMAL=1.
-wasExecPath    db 128 dup(0)
+extrn wasExecPath:byte ; storage in final zero arena (WASUI.ASM)
 wasCmdTail     db 0,128 dup(0)
 wasShow        dw 2,1
 wasExecBlock   dw 0,offset wasCmdTail,0,offset wasShow,0,0,0
@@ -105,12 +122,50 @@ wasWaitStart   dw 0        ; DOS 2Ch second-of-minute clock (centiseconds)
 IFDEF WAS_WIN300
 wasTimerId     dw 0        ; NULL-window task timer for WAIT, 100ms tick
 ENDIF
+wasWindowHwnd dw 0
+wasWindowCount db 0
+wasWaitWindow db 0
+wasWindowProc dw 2 dup(0)
+extrn wasWindowCaption:byte ; storage in final zero arena (WASUI.ASM)
+extrn wasWindowScratch:byte ; storage in final zero arena (WASUI.ASM)
+wasWindowRect dw 4 dup(0)
+wasWindowOrigin dw 2 dup(0)
+wasInputProc dw 2 dup(0) ; validated USER mouse callback
+wasDriverName dw offset inputMouseName
+wasKeyProc dw 2 dup(0)
+wasKeyPair dw 0
+wasKeyAction db 0
+extrn wasKeysHeld:byte ; indexed by XT scan, value=VK (supports OEM VKs)
+; First 7 words are also emitted as private failure-probe metadata.
+wasUserCode dw 0
+wasUserExportSeg dw 0
+wasDriverEntry dw 2 dup(0)
+wasDriverExport dw 2 dup(0)
+wasDriverData dw 0
+wasCandidate dw 0
+wasStorageSeg dw 0
+wasStoragePrefix db 0
+wasDragDX dw 0
+wasDragDY dw 0
+wasDragBudget dw 0
+wasDragCapX dw 0
+wasDragCapY dw 0
+wasMouseHeld db 0
+wasMouseAction db 0
+wasFocusSelect db 0
+wasMouseMask db 0
+wasMouseDownFlag dw 0
+wasMouseUpFlag dw 0
+wasMouseRelative db 0
+wasMouseReqX   dw 0
+wasMouseReqY   dw 0
+wasMousePoint  dw 2 dup(0FFFFh) ; USER POINT; sentinel on unavailable readback
 wasTemp        dw 0
-wasRawTail     db 128 dup(0)
+extrn wasRawTail:byte ; storage in final zero arena (WASUI.ASM)
 wasTraceH      dw 0FFFFh
 wasTracePath   db 'EARLY.LOG',0
 traceTask      db 'WAS_INITTASK',0
-traceBuild     db 'NOWBAT_BUILD=W047',0 ; resident startup identity for audit
+traceBuild     db 'NOWBAT_BUILD=W054',0 ; resident startup identity for audit
 traceApp       db 'WAS_INITAPP',0
 traceVersion   db 'WAS_VERSION=',0
 traceWinFlags  db 'WAS_WINFLAGS=',0
@@ -144,6 +199,18 @@ start:
  or ax,ax
  jz wasQuitFail
  mov wasInst,di
+ ; Restore all omitted on-disk zero buffers before any script or UI use.
+ ; InitTask has supplied DS; preserve its ES:BX command-tail pointer.
+ push es
+ push ds
+ pop es
+ mov di,offset WasZeroStart
+ mov cx,offset WasZeroEnd
+ sub cx,di
+ xor ax,ax
+ cld
+ rep stosb
+ pop es
  ; Own InitTask ES:BX before any other Windows call. Accept the
  ; original ASCII tail and the DOS length+CR form used by some loaders.
  cld
@@ -346,6 +413,51 @@ wasDispatch:
  lea di,cmdWAIT
  call IsCommand
  jc commandWait
+ lea di,cmdDOEVENTS
+ call IsCommand
+ jc commandDoEvents
+ lea di,cmdWAITFOR
+ call IsCommand
+ jc commandWaitFor
+ lea di,cmdMOUSEMOVE
+ call IsCommand
+ jc commandMouseMove
+ lea di,cmdWINDOWSELECT
+ call IsCommand
+ jc commandWindowSelect
+ lea di,cmdWINDOWFOCUS
+ call IsCommand
+ jc commandWindowFocus
+ lea di,cmdMOUSEDOWN
+ call IsCommand
+ jc commandMouseDown
+ lea di,cmdMOUSEUP
+ call IsCommand
+ jc commandMouseUp
+ lea di,cmdMOUSECLICK
+ call IsCommand
+ jc commandMouseClick
+ lea di,cmdMOUSEDBLCLICK
+ call IsCommand
+ jc commandMouseDblClick
+ lea di,cmdKEYDOWN
+ call IsCommand
+ jc commandKeyDown
+ lea di,cmdKEYUP
+ call IsCommand
+ jc commandKeyUp
+ lea di,cmdKEYPRESS
+ call IsCommand
+ jc commandKeyPress
+ lea di,cmdKEYCOMBO
+ call IsCommand
+ jc commandKeyCombo
+ lea di,cmdTYPE
+ call IsCommand
+ jc commandType
+ lea di,cmdRELEASEINPUT
+ call IsCommand
+ jc commandReleaseInput
  lea di,cmdSET
  call IsCommand
  jc commandSet
@@ -516,6 +628,1750 @@ wasLogAlreadyClosed:
  mov wasResult,0
  jmp wasLoop
 
+; One bounded message-pump pass followed by a cooperative task yield.
+; UiPump normally skips the queue when headless, so temporarily enable it.
+; No new window or resident worker is created. Held-input state is untouched.
+commandDoEvents:
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasCmdFailure
+ xor ax,ax
+ mov al,uiPumpAny
+ push ax
+ mov uiPumpAny,1
+ call UiPump
+ pop ax
+ mov uiPumpAny,al
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ cmp wasStop,0
+ jne wasExit
+ call Yield
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ cmp wasStop,0
+ jne wasExit
+ mov wasResult,0
+ mov wasErrorCode,0
+ jmp wasLoop
+
+; Absolute desktop movement, not a fake WM_MOUSEMOVE. USER does clipping.
+; Require exact live readback; never trust the legacy VOID return value.
+commandMouseMove:
+ mov wasMouseRelative,0
+ call FetchArg
+ lea si,wasInput
+ lea di,winRelName
+ call EqualStrings
+ jnc wasMouseParseX
+ mov wasMouseRelative,1
+ call FetchArg
+wasMouseParseX:
+ lea si,wasInput
+ call ParseUInt
+ jc wasMouseBadArg
+ cmp ax,7FFFh
+ ja wasMouseBadArg
+ mov wasMouseReqX,ax
+ call FetchArg
+ lea si,wasInput
+ call ParseUInt
+ jc wasMouseBadArg
+ cmp ax,7FFFh
+ ja wasMouseBadArg
+ mov wasMouseReqY,ax
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasMouseBadArg
+ cmp wasMouseRelative,0
+ je wasMouseAbsolute
+ call WasReadWindow
+ jc wasMouseBadArg
+ mov ax,wasMouseReqX
+ cmp ax,wasWindowRect+4
+ jae wasMouseBadArg
+ add ax,wasWindowOrigin
+ jo wasMouseBadArg
+ test ax,8000h
+ jnz wasMouseBadArg
+ mov wasMouseReqX,ax
+ mov ax,wasMouseReqY
+ cmp ax,wasWindowRect+6
+ jae wasMouseBadArg
+ add ax,wasWindowOrigin+2
+ jo wasMouseBadArg
+ test ax,8000h
+ jnz wasMouseBadArg
+ mov wasMouseReqY,ax
+wasMouseAbsolute:
+ ; While a button is held, move through the actual input callback. USER's
+ ; absolute cursor setter is retained for ordinary, unheld positioning.
+ cmp wasMouseHeld,0
+ je wasMouseSetAbsolute
+ call WasDragToPoint
+ jc wasMouseMismatch
+ jmp wasMouseMoveOK
+wasMouseSetAbsolute:
+ push wasMouseReqX         ; Win16 FAR PASCAL x, y (left to right)
+ push wasMouseReqY
+ call SetCursorPos
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ call WasReadMouse
+ mov ax,wasMousePoint
+ cmp ax,wasMouseReqX
+ jne wasMouseMismatch
+ mov ax,wasMousePoint+2
+ cmp ax,wasMouseReqY
+ jne wasMouseMismatch
+wasMouseMoveOK:
+ mov wasResult,0
+ mov wasErrorCode,0
+ jmp wasLoop
+wasMouseBadArg:
+ mov wasResult,2
+ mov wasErrorCode,87        ; invalid argument
+ jmp wasLoop
+wasMouseMismatch:
+ mov wasResult,2           ; cursor clipped or unavailable
+ mov wasErrorCode,0        ; USER gives no extended error
+ jmp wasLoop
+
+; Read an actual Win16 POINT. Do not assume GetCursorPos returns BOOL.
+WasReadMouse proc near
+ mov word ptr wasMousePoint,0FFFFh
+ mov word ptr wasMousePoint+2,0FFFFh
+ push ds
+ mov ax,offset wasMousePoint
+ push ax
+ call GetCursorPos
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ ; Real-mode desktops have nonnegative signed coordinates. Normalize an
+ ; unavailable or negative POINT to the documented sentinel.
+ test word ptr wasMousePoint,8000h
+ jnz wasMouseReadInvalid
+ test word ptr wasMousePoint+2,8000h
+ jz wasMouseReadDone
+wasMouseReadInvalid:
+ mov word ptr wasMousePoint,0FFFFh
+ mov word ptr wasMousePoint+2,0FFFFh
+wasMouseReadDone:
+ ret
+WasReadMouse endp
+
+; Exact top-level caption selection. No activation or input is fabricated.
+; The enumeration callback always continues, so duplicate captions fail.
+commandWindowFocus:
+ mov wasFocusSelect,1
+ jmp wasWindowSelectStart
+commandWindowSelect:
+ mov wasFocusSelect,0
+wasWindowSelectStart:
+ mov wasWindowHwnd,0
+ mov wasWindowCount,0
+ call FetchArg
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasWindowBad
+ lea si,wasInput
+ lea di,wasWindowCaption
+ mov cx,127
+ cmp byte ptr [si],0
+ je wasWindowBad
+wasWindowCopy:
+ lodsb
+ stosb
+ or al,al
+ jz wasWindowEnumerate
+ loop wasWindowCopy
+ jmp wasWindowBad
+wasWindowEnumerate:
+ call WasFindWindow
+ cmp ax,0
+ je wasWindowFound
+ cmp ax,1
+ je wasWindowMissing
+ jmp wasWindowBad
+wasWindowFound:
+ cmp wasFocusSelect,0
+ je wasWindowSelectOK
+ push wasWindowHwnd
+ call SetActiveWindow
+ call WasWindowData
+ call GetActiveWindow
+ call WasWindowData
+ cmp ax,wasWindowHwnd
+ jne wasWindowBad
+wasWindowSelectOK:
+ mov wasResult,0
+ mov wasErrorCode,0
+ jmp wasLoop
+wasWindowMissing:
+ mov wasWindowHwnd,0
+ mov wasResult,1
+ mov wasErrorCode,0
+ jmp wasLoop
+wasWindowBad:
+ mov wasWindowHwnd,0
+ mov wasResult,2
+ mov wasErrorCode,87
+ jmp wasLoop
+
+; Probe a unique usable caption. AX=0 found, 1 missing, 2 error.
+; Every probe clears the previous handle; no activation occurs here.
+WasFindWindow proc near
+ mov wasWindowHwnd,0
+ mov wasWindowCount,0
+ push cs
+ mov ax,offset WasEnumWindow
+ push ax
+ push wasInst
+ call MakeProcInstance
+ call WasWindowData
+ mov wasWindowProc,ax
+ mov wasWindowProc+2,dx
+ or ax,dx
+ jz wasFindWindowBad
+ push wasWindowProc+2
+ push wasWindowProc
+ xor ax,ax
+ push ax
+ push ax
+ call EnumWindows
+ call WasWindowData
+ push wasWindowProc+2
+ push wasWindowProc
+ call FreeProcInstance
+ call WasWindowData
+ cmp wasWindowCount,0
+ je wasFindWindowMissing
+ cmp wasWindowCount,1
+ jne wasFindWindowBad
+ call WasReadWindow
+ jc wasFindWindowBad
+ xor ax,ax
+ ret
+wasFindWindowMissing:
+ mov ax,1
+ ret
+wasFindWindowBad:
+ mov wasWindowHwnd,0
+ mov ax,2
+ ret
+WasFindWindow endp
+
+; Preserve the return DX:AX from FAR PASCAL calls while restoring segments.
+WasWindowData proc near
+ push ax
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ pop ax
+ ret
+WasWindowData endp
+
+; HWND, LPARAM; callback returns BOOL and removes six argument bytes.
+WasEnumWindow proc far
+ push bp
+ mov bp,sp
+ push ds
+ push es
+ push bx
+ push cx
+ push dx
+ push si
+ push di
+ call WasWindowData
+ mov bx,[bp+10]
+ call WasWindowMatch
+ jnc wasEnumNext
+ cmp wasWindowCount,2
+ jae wasEnumNext
+ inc wasWindowCount
+ mov ax,[bp+10]
+ mov wasWindowHwnd,ax
+wasEnumNext:
+ pop di
+ pop si
+ pop dx
+ pop cx
+ pop bx
+ pop es
+ pop ds
+ mov ax,1
+ pop bp
+ retf 6
+WasEnumWindow endp
+
+; BX=HWND. CF=1 for a full case-insensitive caption match.
+WasWindowMatch proc near
+ mov byte ptr wasWindowScratch,0
+ push bx
+ push ds
+ mov ax,offset wasWindowScratch
+ push ax
+ mov ax,128
+ push ax
+ call GetWindowText
+ call WasWindowData
+ or ax,ax
+ jz wasWindowNoMatch
+ cmp ax,127
+ jae wasWindowNoMatch
+ lea si,wasWindowCaption
+ lea di,wasWindowScratch
+ call EqualStrings
+ ret
+wasWindowNoMatch:
+ clc
+ ret
+WasWindowMatch endp
+
+; CF=0 for live client geometry, CF=1 if no valid selected window.
+; Re-check the caption to reject stale/reused HWNDs. Keep result variables
+; untouched during read-only interpolation. Coordinates are screen pixels.
+WasReadWindow proc near
+ mov ax,wasWindowHwnd
+ or ax,ax
+ jz wasWindowReadBad
+ push ax
+ call IsWindow
+ call WasWindowData
+ or ax,ax
+ jz wasWindowReadBad
+ mov bx,wasWindowHwnd
+ call WasWindowMatch
+ jnc wasWindowReadBad
+ mov word ptr wasWindowRect,0FFFFh
+ mov word ptr wasWindowRect+2,0FFFFh
+ mov word ptr wasWindowRect+4,0
+ mov word ptr wasWindowRect+6,0
+ push wasWindowHwnd
+ push ds
+ mov ax,offset wasWindowRect
+ push ax
+ call GetClientRect
+ call WasWindowData
+ cmp word ptr wasWindowRect,0
+ jne wasWindowReadBad
+ cmp word ptr wasWindowRect+2,0
+ jne wasWindowReadBad
+ mov ax,wasWindowRect+4
+ or ax,ax
+ jle wasWindowReadBad
+ mov ax,wasWindowRect+6
+ or ax,ax
+ jle wasWindowReadBad
+ mov word ptr wasWindowOrigin,0
+ mov word ptr wasWindowOrigin+2,0
+ push wasWindowHwnd
+ push ds
+ mov ax,offset wasWindowOrigin
+ push ax
+ call ClientToScreen
+ call WasWindowData
+ clc
+ ret
+wasWindowReadBad:
+ mov wasWindowHwnd,0
+ stc
+ ret
+WasReadWindow endp
+
+ ; W075: genuine native mouse input. Win3 provides the USER callback getter.
+; Legacy drivers can store the callback in CS or in DLL automatic data.
+; Accept only a unique pointer supported by paired direct stores in Enable
+; and a matching indirect FAR call in the driver's code. Never write driver
+; memory or call Enable/Disable. Unknown layouts fail closed.
+WasLookupOrdinal proc near
+ push bx
+ push ds
+ push si
+ call GetModuleHandle
+ call WasWindowData
+ pop bx
+ or ax,ax
+ jz wasLookupMissing
+ push ax
+ xor ax,ax
+ push ax
+ push bx
+ call GetProcAddress
+ call WasWindowData
+ ret
+wasLookupMissing:
+ xor dx,dx
+ ret
+WasLookupOrdinal endp
+
+; Loaded Win1/2 exports may be kernel entry stubs, not the driver body.
+; Observed WIN101 form: SAR BYTE PTR CS:[disp16],1; JMP FAR ptr16:16.
+; Follow the jump without executing the reference-count instruction. Also
+; support a plain far-jump entry. Bound the chain; never call a guess.
+; DX:AX in/out, CF on invalid/cyclic chain; other registers unchanged.
+WasFollowEntry proc near
+ push bx
+ push cx
+ push si
+ push es
+ mov cx,8
+wasFollowNext:
+ or dx,dx
+ jz wasFollowBad
+ cmp ax,0FFF6h
+ ja wasFollowBad
+ mov es,dx
+ mov si,ax
+ cmp byte ptr es:[si],0EAh
+ je wasFollowFar
+ cmp word ptr es:[si],0D02Eh
+ jne wasFollowDone
+ cmp byte ptr es:[si+2],3Eh
+ jne wasFollowDone
+ cmp byte ptr es:[si+5],0EAh
+ jne wasFollowDone
+ add si,5
+wasFollowFar:
+ mov bx,es:[si+1]
+ mov dx,es:[si+3]
+ mov ax,bx
+ dec cx
+ jnz wasFollowNext
+wasFollowBad:
+ xor ax,ax
+ xor dx,dx
+ stc
+ jmp wasFollowExit
+wasFollowDone:
+ clc
+wasFollowExit:
+ pop es
+ pop si
+ pop cx
+ pop bx
+ ret
+WasFollowEntry endp
+
+WasResolveMouse proc near
+ cmp word ptr wasInputProc+2,0
+ jne wasResolveReady
+IFDEF WAS_WIN300
+ cmp wasDriverName,offset inputMouseName
+ jne wasResolveLegacy
+ call GetMouseEventProc
+ call WasWindowData
+ or dx,dx
+ jz wasResolveLegacy
+ mov wasInputProc,ax
+ mov wasInputProc+2,dx
+ jmp wasResolveReady
+ENDIF
+wasResolveLegacy:
+ mov wasUserCode,0
+ mov wasUserExportSeg,0
+ mov word ptr wasDriverEntry,0
+ mov word ptr wasDriverEntry+2,0
+ mov word ptr wasDriverExport,0
+ mov word ptr wasDriverExport+2,0
+ mov wasDriverData,0
+ lea si,inputUserName
+ mov bx,17
+ call WasLookupOrdinal
+ or dx,dx
+ jz wasResolveBad
+ mov wasUserExportSeg,dx
+ call WasFollowEntry
+ jc wasResolveBad
+ mov wasUserCode,dx
+ mov si,wasDriverName
+ mov bx,2
+ call WasLookupOrdinal
+ or dx,dx
+ jz wasResolveBad
+ mov wasDriverExport,ax
+ mov wasDriverExport+2,dx
+ call WasFollowEntry
+ jc wasResolveBad
+ cmp ax,0FF7Fh
+ ja wasResolveBad
+ mov wasDriverEntry,ax
+ mov wasDriverEntry+2,dx
+ mov es,dx
+ mov wasDriverData,0
+ mov si,wasDriverEntry
+ call WasFindDriverData
+ cmp wasDriverData,0
+ jne wasDriverDataResolved
+ ; Some drivers export a thin Enable routine. Inquire is another DLL
+ ; export in the same module, so its recognized prologue can supply DS.
+ mov si,wasDriverName
+ mov bx,1
+ call WasLookupOrdinal
+ or dx,dx
+ jz wasDriverDataResolved
+ call WasFollowEntry
+ jc wasDriverDataResolved
+ cmp ax,0FFF0h
+ ja wasDriverDataResolved
+ mov es,dx
+ mov si,ax
+ call WasFindDriverData
+wasDriverDataResolved:
+ ; KEYBOARD Enable receives a FAR callback plus a FAR key-state buffer.
+ ; Win1's ISR lives outside Enable's code segment. Its explicit stack
+ ; argument stores identify the live callback without a mouse call-site.
+ cmp wasDriverName,offset inputKeyName
+ jne wasResolveGeneric
+ call WasKeyEnableSlot
+ jc wasResolveGeneric
+ jmp wasResolveReady
+wasResolveGeneric:
+ mov es,wasDriverEntry+2
+ ; First search CS-relative storage (older single-segment drivers).
+ mov ax,wasDriverEntry+2
+ mov wasStorageSeg,ax
+ mov wasStoragePrefix,2Eh
+ call WasScanMouseStores
+ jc wasResolveBad
+ ; Then search automatic-data storage, where the DLL entry prologue
+ ; gives us the actual loaded DS, rather than assuming DS equals CS.
+ mov ax,wasDriverData
+ or ax,ax
+ jz wasResolveCheck
+ mov wasStorageSeg,ax
+ mov wasStoragePrefix,0
+ call WasScanMouseStores
+ jc wasResolveBad
+wasResolveCheck:
+ cmp word ptr wasInputProc+2,0
+ je wasResolveBad
+wasResolveReady:
+ call WasWindowData
+ clc
+ ret
+wasResolveBad:
+ mov word ptr wasInputProc,0
+ mov word ptr wasInputProc+2,0
+ call WasWindowData
+ call WasInputProbe
+ stc
+ ret
+WasResolveMouse endp
+
+; Win1 keyboard Enable's explicit callback capture (observed W078):
+; LES BX,[BP+0Ah]; MOV AX,ES; MOV [slot],BX; MOV [slot+2],ES.
+; Only accept this exact argument/store sequence in the entry prologue,
+; with a recognized DLL DS and a live pointer into the known USER segment.
+; No fixed physical addresses, interrupts, driver writes or guessed calls.
+WasKeyEnableSlot proc near
+ mov ax,wasDriverData
+ or ax,ax
+ jz wasKeySlotBad
+ mov es,wasDriverEntry+2
+ mov si,wasDriverEntry
+ mov cx,32
+wasKeySlotScan:
+ cmp word ptr es:[si],5EC4h
+ jne wasKeySlotNext
+ cmp word ptr es:[si+2],8C0Ah
+ jne wasKeySlotNext
+ cmp word ptr es:[si+4],89C0h
+ jne wasKeySlotNext
+ cmp byte ptr es:[si+6],1Eh
+ jne wasKeySlotNext
+ cmp word ptr es:[si+9],068Ch
+ jne wasKeySlotNext
+ mov bx,es:[si+7]
+ cmp bx,0FFFCh
+ ja wasKeySlotBad
+ mov ax,bx
+ add ax,2
+ cmp ax,es:[si+11]
+ jne wasKeySlotBad
+ mov es,wasDriverData
+ mov ax,es:[bx]
+ mov dx,es:[bx+2]
+ or ax,ax
+ jz wasKeySlotBad
+ cmp dx,wasUserCode
+ je wasKeySlotOK
+ cmp dx,wasUserExportSeg
+ jne wasKeySlotBad
+wasKeySlotOK:
+ mov wasInputProc,ax
+ mov wasInputProc+2,dx
+ clc
+ ret
+wasKeySlotNext:
+ inc si
+ loop wasKeySlotScan
+wasKeySlotBad:
+ stc
+ ret
+WasKeyEnableSlot endp
+
+; Recognize the Win16 DLL export prologue: MOV AX,automatic-data-segment,
+; optional NOP, INC BP/PUSH BP/MOV BP,SP/PUSH DS/MOV DS,AX. Do not infer
+; a data segment from arbitrary immediate values. ES is driver code.
+WasFindDriverData proc near
+ push si
+ cmp si,0FFDFh
+ ja wasDriverDataFrameOnly
+ mov cx,24
+wasDriverCSScan:
+ ; Single-segment assembler drivers may load DS directly from CS.
+ cmp word ptr es:[si],1F0Eh
+ je wasDriverCSFound
+ cmp word ptr es:[si],0C88Ch
+ jne wasDriverCSNext
+ cmp word ptr es:[si+2],0D88Eh
+ je wasDriverCSFound
+wasDriverCSNext:
+ inc si
+ loop wasDriverCSScan
+wasDriverDataFrameOnly:
+ pop si
+ cmp byte ptr es:[si],0B8h
+ jne wasDriverDataDone
+ mov dx,es:[si+1]
+ add si,3
+ cmp byte ptr es:[si],90h
+ jne wasDriverDataFrame
+ inc si
+wasDriverDataFrame:
+ cmp word ptr es:[si],5545h
+ jne wasDriverDataDone
+ cmp word ptr es:[si+2],0EC8Bh
+ je wasDriverDataFrameOK
+ cmp word ptr es:[si+2],0E589h
+ jne wasDriverDataDone
+wasDriverDataFrameOK:
+ cmp byte ptr es:[si+4],1Eh
+ jne wasDriverDataDone
+ cmp word ptr es:[si+5],0D88Eh
+ je wasDriverDataFound
+ cmp word ptr es:[si+5],1F50h
+ jne wasDriverDataDone
+wasDriverDataFound:
+ mov wasDriverData,dx
+ jmp wasDriverDataDone
+wasDriverCSFound:
+ pop si
+ mov wasDriverData,es
+wasDriverDataDone:
+ ret
+WasFindDriverData endp
+
+; Get direct word-store operand at ES:SI for the selected storage model.
+; AX/BX scratch, SI unchanged. CF=0 and BX=offset on success.
+WasMouseStoreOperand proc near
+ push si
+ cmp wasStoragePrefix,0
+ je wasStoreDefaultSeg
+ cmp byte ptr es:[si],2Eh
+ jne wasStoreOperandBad
+ inc si
+ jmp wasStoreOpcode
+wasStoreDefaultSeg:
+ cmp byte ptr es:[si],3Eh
+ jne wasStoreDefaultCheck
+ inc si
+ jmp wasStoreOpcode
+wasStoreDefaultCheck:
+ cmp si,wasDriverEntry
+ je wasStoreOpcode
+ ; Do not misinterpret a CS/ES/SS-prefixed store as a DS store.
+ mov al,es:[si-1]
+ cmp al,2Eh
+ je wasStoreOperandBad
+ cmp al,26h
+ je wasStoreOperandBad
+ cmp al,36h
+ je wasStoreOperandBad
+wasStoreOpcode:
+ mov al,es:[si]
+ cmp al,0A3h
+ je wasStoreOperandA3
+ cmp al,89h
+ je wasStoreOperandModRM
+ cmp al,8Ch
+ je wasStoreOperandModRM
+ cmp al,8Fh
+ jne wasStoreOperandBad
+wasStoreOperandModRM:
+ mov al,es:[si+1]
+ and al,0C7h
+ cmp al,06h
+ jne wasStoreOperandBad
+ mov bx,es:[si+2]
+ jmp wasStoreOperandOK
+wasStoreOperandA3:
+ mov bx,es:[si+1]
+wasStoreOperandOK:
+ pop si
+ clc
+ ret
+wasStoreOperandBad:
+ pop si
+ stc
+ ret
+WasMouseStoreOperand endp
+
+WasScanMouseStores proc near
+ mov si,wasDriverEntry
+ mov cx,124
+wasResolveScan:
+ call WasMouseStoreOperand
+ jc wasResolveNext
+ cmp bx,0FFFCh
+ ja wasResolveNext
+ ; A valid pointer must target the known loaded USER code segment.
+ push es
+ mov es,wasStorageSeg
+ mov ax,es:[bx+2]
+ pop es
+ cmp ax,wasUserCode
+ je wasResolveUserSegmentOK
+ cmp ax,wasUserExportSeg
+ jne wasResolveNext
+wasResolveUserSegmentOK:
+ push si
+ push cx
+ push bx
+ add bx,2
+ call WasFindStore
+ pop bx
+ jc wasResolveSkip
+ call WasFindCall
+ jc wasResolveSkip
+ push es
+ mov es,wasStorageSeg
+ mov ax,es:[bx]
+ mov dx,es:[bx+2]
+ pop es
+ cmp word ptr wasInputProc+2,0
+ je wasResolveFirst
+ cmp wasInputProc,ax
+ jne wasResolveConflict
+ cmp wasInputProc+2,dx
+ jne wasResolveConflict
+ jmp wasResolveSkip
+wasResolveFirst:
+ mov wasInputProc,ax
+ mov wasInputProc+2,dx
+wasResolveSkip:
+ pop cx
+ pop si
+wasResolveNext:
+ inc si
+ dec cx
+ jz wasResolveScanDone
+ jmp wasResolveScan
+wasResolveConflict:
+ pop cx
+ pop si
+ stc
+ ret
+wasResolveScanDone:
+ clc
+ ret
+WasScanMouseStores endp
+
+; Private failure evidence, INABI.DAT: 128 bytes of resolved Enable,
+; seven little-endian metadata words (USER resolved/export segments,
+; Enable resolved/export far pointers, driver DS), then first 512 bytes
+; of the resolved driver code segment. Keyboard failure also appends
+; the first 1024 bytes of recognized driver DS (live slot/ISR evidence).
+; Never package in public DIST.
+; The failure report keeps both the actual routine and its data context.
+WasInputProbe proc near
+ cmp word ptr wasDriverEntry+2,0
+ je wasProbeDone
+ push ds
+ pop es
+ mov ax,wasDriverEntry+2
+ mov si,wasDriverEntry
+ mov ds,ax
+ mov di,offset wasWindowScratch
+ mov cx,128
+ cld
+ rep movsb
+ call WasWindowData
+ mov ah,3Ch
+ xor cx,cx
+ lea dx,inputProbePath
+ call Dos3Call
+ jc wasProbeDone
+ mov bx,ax
+ push bx
+ mov ah,40h
+ mov cx,128
+ lea dx,wasWindowScratch
+ call Dos3Call
+ pop bx
+ push bx
+ mov ah,40h
+ mov cx,14
+ lea dx,wasUserCode
+ call Dos3Call
+ pop bx
+ push bx
+ mov ax,wasDriverEntry+2
+ mov ds,ax
+ xor dx,dx
+ mov cx,512
+ mov ah,40h
+ call Dos3Call
+ call WasWindowData
+ pop bx
+ cmp wasDriverName,offset inputKeyName
+ jne wasProbeClose
+ mov ax,wasDriverData
+ or ax,ax
+ jz wasProbeClose
+ push bx
+ mov ds,ax
+ xor dx,dx
+ mov cx,1024
+ mov ah,40h
+ call Dos3Call
+ call WasWindowData
+ pop bx
+wasProbeClose:
+ mov ah,3Eh
+ call Dos3Call
+wasProbeDone:
+ call WasWindowData
+ ret
+WasInputProbe endp
+
+ ; BX=second word offset, ES=loaded driver code. Check matching store.
+WasFindStore proc near
+ mov wasCandidate,bx
+ mov si,wasDriverEntry
+ mov cx,124
+wasStoreScan:
+ call WasMouseStoreOperand
+ jc wasStoreNext
+ cmp bx,wasCandidate
+ je wasStoreFound
+wasStoreNext:
+ inc si
+ loop wasStoreScan
+ stc
+ ret
+wasStoreFound:
+ clc
+ ret
+WasFindStore endp
+
+; Require a FAR indirect call through the same slot and segment model.
+WasFindCall proc near
+ xor si,si
+ mov cx,4092
+wasCallScan:
+ push si
+ cmp wasStoragePrefix,0
+ je wasCallDefault
+ cmp byte ptr es:[si],2Eh
+ jne wasCallSkip
+ inc si
+ jmp wasCallOpcode
+wasCallDefault:
+ cmp byte ptr es:[si],3Eh
+ jne wasCallDefaultCheck
+ inc si
+ jmp wasCallOpcode
+wasCallDefaultCheck:
+ or si,si
+ jz wasCallOpcode
+ mov al,es:[si-1]
+ cmp al,2Eh
+ je wasCallSkip
+ cmp al,26h
+ je wasCallSkip
+ cmp al,36h
+ je wasCallSkip
+wasCallOpcode:
+ cmp word ptr es:[si],1EFFh
+ jne wasCallSkip
+ cmp es:[si+2],bx
+ je wasCallFound
+wasCallSkip:
+ pop si
+ inc si
+ dec cx
+ jz wasCallMissing
+ jmp wasCallScan
+wasCallMissing:
+ stc
+ ret
+wasCallFound:
+ pop si
+ clc
+ ret
+WasFindCall endp
+
+; Actual held-button motion: use bounded relative mickey events, checking
+; USER's live position after each event. Acceleration/rounding can differ
+; between versions; small corrections converge without fake WM_MOUSEMOVE.
+WasDragToPoint proc near
+ mov wasDragBudget,512
+ mov wasDragCapX,8
+ mov wasDragCapY,8
+ mov wasDragDX,0
+ mov wasDragDY,0
+wasDragNext:
+ call WasReadMouse
+ cmp word ptr wasMousePoint,0FFFFh
+ je wasDragBad
+ mov ax,wasMouseReqX
+ sub ax,wasMousePoint
+ mov bx,wasDragDX
+ mov cx,wasDragCapX
+ call WasDragClamp
+ jc wasDragBad
+ mov wasDragCapX,cx
+ mov wasDragDX,ax
+ mov ax,wasMouseReqY
+ sub ax,wasMousePoint+2
+ mov bx,wasDragDY
+ mov cx,wasDragCapY
+ call WasDragClamp
+ jc wasDragBad
+ mov wasDragCapY,cx
+ mov wasDragDY,ax
+ or ax,wasDragDX
+ jz wasDragDone
+ mov ax,1
+ call WasMouseEvent
+ jc wasDragBad
+ call WasInputYield
+ dec wasDragBudget
+ jnz wasDragNext
+ ; Allow the last delivered event to satisfy the exact target.
+ call WasReadMouse
+ mov ax,wasMousePoint
+ cmp ax,wasMouseReqX
+ jne wasDragBad
+ mov ax,wasMousePoint+2
+ cmp ax,wasMouseReqY
+ jne wasDragBad
+wasDragDone:
+ clc
+ ret
+wasDragBad:
+ lea si,inputDragTrace
+ call TraceLine
+ stc
+ ret
+WasDragToPoint endp
+
+; Clamp each relative step, reducing overshoot at accelerated mouse speeds.
+; AX = signed remaining pixel error, BX = last relative input for this axis,
+; CX = positive step cap. Return AX = next input, CX = adjusted cap.
+; USER may accelerate mickeys. Reduce the cap on crossing the target, using
+; half the actual previous input (not half the old cap). Keep axes independent.
+; A reversal at one mickey cannot be refined further: fail, never fake success.
+WasDragClamp proc near
+ or ax,ax
+ jz wasDragClampDone
+ or bx,bx
+ jz wasDragClampApply
+ mov dx,ax
+ xor dx,bx
+ jns wasDragClampApply
+ or bx,bx
+ jns wasDragClampMagnitude
+ neg bx
+wasDragClampMagnitude:
+ cmp bx,1
+ jbe wasDragClampImpossible
+ shr bx,1
+ cmp bx,cx
+ jae wasDragClampApply
+ mov cx,bx
+wasDragClampApply:
+ cmp ax,cx
+ jle wasDragClampLow
+ mov ax,cx
+ jmp short wasDragClampDone
+wasDragClampLow:
+ mov dx,cx
+ neg dx
+ cmp ax,dx
+ jge wasDragClampDone
+ mov ax,dx
+wasDragClampDone:
+ clc
+ ret
+wasDragClampImpossible:
+ stc
+ ret
+WasDragClamp endp
+
+; AX mouse status. Driver ABI: AX flags, BX/CX relative motion, DX button
+; count, SI/DI zero. Preserve FLAGS and the caller's general/segment regs.
+WasMouseEvent proc near
+ push ax
+ call WasResolveMouse
+ pop ax
+ jc wasEventBad
+ pushf
+ push ax
+ push bp
+ push bx
+ push cx
+ push dx
+ push si
+ push di
+ push ds
+ push es
+ xor bx,bx
+ xor cx,cx
+ test ax,1
+ jz wasEventButton
+ mov bx,wasDragDX
+ mov cx,wasDragDY
+wasEventButton:
+ mov dx,2
+ xor si,si
+ xor di,di
+ cld
+ call dword ptr wasInputProc
+ pop es
+ pop ds
+ pop di
+ pop si
+ pop dx
+ pop cx
+ pop bx
+ pop bp
+ pop ax
+ popf
+ call WasWindowData
+ clc
+ ret
+wasEventBad:
+ stc
+ ret
+WasMouseEvent endp
+
+; Explicit states are kept until released. Invalid transitions fail without
+; injecting anything. Down/up are separate real driver events, with Yield.
+commandMouseDown:
+ mov wasMouseAction,0
+ jmp wasMouseButtonArg
+commandMouseUp:
+ mov wasMouseAction,1
+ jmp wasMouseButtonArg
+commandMouseClick:
+ mov wasMouseAction,2
+ jmp wasMouseButtonArg
+commandMouseDblClick:
+ mov wasMouseAction,3
+wasMouseButtonArg:
+ call FetchArg
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasButtonBad
+ lea si,wasInput
+ lea di,inputLeftName
+ call EqualStrings
+ jnc wasButtonRight
+ mov wasMouseMask,1
+ mov wasMouseDownFlag,2
+ mov wasMouseUpFlag,4
+ jmp wasButtonParsed
+wasButtonRight:
+ lea si,wasInput
+ lea di,inputRightName
+ call EqualStrings
+ jnc wasButtonBad
+ mov wasMouseMask,2
+ mov wasMouseDownFlag,8
+ mov wasMouseUpFlag,16
+wasButtonParsed:
+ mov al,wasMouseMask
+ test wasMouseHeld,al
+ jz wasButtonNotHeld
+ cmp wasMouseAction,1
+ jne wasButtonBad
+ call WasButtonUp
+ jc wasButtonUnavailable
+ jmp wasButtonOK
+wasButtonNotHeld:
+ cmp wasMouseAction,1
+ je wasButtonBad
+ call WasButtonDown
+ jc wasButtonUnavailable
+ cmp wasMouseAction,0
+ je wasButtonOK
+ call WasButtonUp
+ jc wasButtonUnavailable
+ cmp wasMouseAction,3
+ jne wasButtonOK
+ call WasButtonDown
+ jc wasButtonUnavailable
+ call WasButtonUp
+ jc wasButtonUnavailable
+wasButtonOK:
+ mov wasResult,0
+ mov wasErrorCode,0
+ jmp wasLoop
+wasButtonBad:
+ mov wasResult,2
+ mov wasErrorCode,87
+ jmp wasLoop
+wasButtonUnavailable:
+ lea si,inputUnavailableTrace
+ call TraceLine
+ mov wasResult,2
+ mov wasErrorCode,50
+ jmp wasLoop
+WasButtonDown proc near
+ mov ax,wasMouseDownFlag
+ call WasMouseEvent
+ jc wasButtonDownBad
+ mov al,wasMouseMask
+ or wasMouseHeld,al
+ call WasInputYield
+ clc
+wasButtonDownBad:
+ ret
+WasButtonDown endp
+WasButtonUp proc near
+ mov ax,wasMouseUpFlag
+ call WasMouseEvent
+ jc wasButtonUpBad
+ mov al,wasMouseMask
+ not al
+ and wasMouseHeld,al
+ call WasInputYield
+ clc
+wasButtonUpBad:
+ ret
+WasButtonUp endp
+WasInputYield proc near
+ call Yield
+ call WasWindowData
+ ret
+WasInputYield endp
+keyNameTable label byte
+ db 49,2,'1',0
+ db 50,3,'2',0
+ db 51,4,'3',0
+ db 52,5,'4',0
+ db 53,6,'5',0
+ db 54,7,'6',0
+ db 55,8,'7',0
+ db 56,9,'8',0
+ db 57,10,'9',0
+ db 48,11,'0',0
+ db 81,16,'Q',0
+ db 87,17,'W',0
+ db 69,18,'E',0
+ db 82,19,'R',0
+ db 84,20,'T',0
+ db 89,21,'Y',0
+ db 85,22,'U',0
+ db 73,23,'I',0
+ db 79,24,'O',0
+ db 80,25,'P',0
+ db 65,30,'A',0
+ db 83,31,'S',0
+ db 68,32,'D',0
+ db 70,33,'F',0
+ db 71,34,'G',0
+ db 72,35,'H',0
+ db 74,36,'J',0
+ db 75,37,'K',0
+ db 76,38,'L',0
+ db 90,44,'Z',0
+ db 88,45,'X',0
+ db 67,46,'C',0
+ db 86,47,'V',0
+ db 66,48,'B',0
+ db 78,49,'N',0
+ db 77,50,'M',0
+ db 27,1,'ESC',0
+ db 8,14,'BACKSPACE',0
+ db 9,15,'TAB',0
+ db 13,28,69,78,84,69,82,0
+ db 17,29,'CTRL',0
+ db 16,42,'SHIFT',0
+ db 18,56,'ALT',0
+ db 32,57,'SPACE',0
+ db 36,71,'HOME',0
+ db 38,72,'UP',0
+ db 33,73,'PGUP',0
+ db 37,75,'LEFT',0
+ db 39,77,'RIGHT',0
+ db 35,79,'END',0
+ db 40,80,'DOWN',0
+ db 34,81,'PGDN',0
+ db 45,82,'INSERT',0
+ db 46,83,'DELETE',0
+ db 112,59,'F1',0
+ db 113,60,'F2',0
+ db 114,61,'F3',0
+ db 115,62,'F4',0
+ db 116,63,'F5',0
+ db 117,64,'F6',0
+ db 118,65,'F7',0
+ db 119,66,'F8',0
+ db 120,67,'F9',0
+ db 121,68,'F10',0
+keyNameCount equ 64
+typeMap label byte
+ db 32,57 ; ASCII 32
+ db 49,130 ; ASCII 33
+ db 222,168 ; ASCII 34
+ db 51,132 ; ASCII 35
+ db 52,133 ; ASCII 36
+ db 53,134 ; ASCII 37
+ db 55,136 ; ASCII 38
+ db 222,40 ; ASCII 39
+ db 57,138 ; ASCII 40
+ db 48,139 ; ASCII 41
+ db 56,137 ; ASCII 42
+ db 187,141 ; ASCII 43
+ db 188,51 ; ASCII 44
+ db 189,12 ; ASCII 45
+ db 190,52 ; ASCII 46
+ db 191,53 ; ASCII 47
+ db 48,11 ; ASCII 48
+ db 49,2 ; ASCII 49
+ db 50,3 ; ASCII 50
+ db 51,4 ; ASCII 51
+ db 52,5 ; ASCII 52
+ db 53,6 ; ASCII 53
+ db 54,7 ; ASCII 54
+ db 55,8 ; ASCII 55
+ db 56,9 ; ASCII 56
+ db 57,10 ; ASCII 57
+ db 186,167 ; ASCII 58
+ db 186,39 ; ASCII 59
+ db 188,179 ; ASCII 60
+ db 187,13 ; ASCII 61
+ db 190,180 ; ASCII 62
+ db 191,181 ; ASCII 63
+ db 50,131 ; ASCII 64
+ db 65,158 ; ASCII 65
+ db 66,176 ; ASCII 66
+ db 67,174 ; ASCII 67
+ db 68,160 ; ASCII 68
+ db 69,146 ; ASCII 69
+ db 70,161 ; ASCII 70
+ db 71,162 ; ASCII 71
+ db 72,163 ; ASCII 72
+ db 73,151 ; ASCII 73
+ db 74,164 ; ASCII 74
+ db 75,165 ; ASCII 75
+ db 76,166 ; ASCII 76
+ db 77,178 ; ASCII 77
+ db 78,177 ; ASCII 78
+ db 79,152 ; ASCII 79
+ db 80,153 ; ASCII 80
+ db 81,144 ; ASCII 81
+ db 82,147 ; ASCII 82
+ db 83,159 ; ASCII 83
+ db 84,148 ; ASCII 84
+ db 85,150 ; ASCII 85
+ db 86,175 ; ASCII 86
+ db 87,145 ; ASCII 87
+ db 88,173 ; ASCII 88
+ db 89,149 ; ASCII 89
+ db 90,172 ; ASCII 90
+ db 219,26 ; ASCII 91
+ db 220,43 ; ASCII 92
+ db 221,27 ; ASCII 93
+ db 54,135 ; ASCII 94
+ db 189,140 ; ASCII 95
+ db 192,41 ; ASCII 96
+ db 65,30 ; ASCII 97
+ db 66,48 ; ASCII 98
+ db 67,46 ; ASCII 99
+ db 68,32 ; ASCII 100
+ db 69,18 ; ASCII 101
+ db 70,33 ; ASCII 102
+ db 71,34 ; ASCII 103
+ db 72,35 ; ASCII 104
+ db 73,23 ; ASCII 105
+ db 74,36 ; ASCII 106
+ db 75,37 ; ASCII 107
+ db 76,38 ; ASCII 108
+ db 77,50 ; ASCII 109
+ db 78,49 ; ASCII 110
+ db 79,24 ; ASCII 111
+ db 80,25 ; ASCII 112
+ db 81,16 ; ASCII 113
+ db 82,19 ; ASCII 114
+ db 83,31 ; ASCII 115
+ db 84,20 ; ASCII 116
+ db 85,22 ; ASCII 117
+ db 86,47 ; ASCII 118
+ db 87,17 ; ASCII 119
+ db 88,45 ; ASCII 120
+ db 89,21 ; ASCII 121
+ db 90,44 ; ASCII 122
+ db 219,154 ; ASCII 123
+ db 220,171 ; ASCII 124
+ db 221,155 ; ASCII 125
+ db 192,169 ; ASCII 126
+
+
+; Keyboard events use the actual USER driver callback, never posted messages.
+; Win3 exposes the documented register ABI at USER.289; Win1/2 resolve
+; the live KEYBOARD Enable slot with the same guarded mouse-driver scanner.
+WasResolveKey proc near
+ cmp word ptr wasKeyProc+2,0
+ jne wasKeyResolveOK
+IFDEF WAS_WIN300
+ lea si,inputUserName
+ mov bx,289
+ call WasLookupOrdinal
+ or dx,dx
+ jz wasKeyResolveLegacy
+ mov wasKeyProc,ax
+ mov wasKeyProc+2,dx
+ jmp wasKeyResolveOK
+ENDIF
+wasKeyResolveLegacy:
+ push word ptr wasInputProc
+ push word ptr wasInputProc+2
+ mov word ptr wasInputProc,0
+ mov word ptr wasInputProc+2,0
+ mov wasDriverName,offset inputKeyName
+ call WasResolveMouse
+ pushf
+ mov ax,wasInputProc
+ mov wasKeyProc,ax
+ mov ax,wasInputProc+2
+ mov wasKeyProc+2,ax
+ popf
+ pop word ptr wasInputProc+2
+ pop word ptr wasInputProc
+ mov wasDriverName,offset inputMouseName
+ jc wasKeyResolveBad
+wasKeyResolveOK:
+ clc
+ ret
+wasKeyResolveBad:
+ stc
+ ret
+WasResolveKey endp
+
+; AX=VK with AH=0 down/80h up; BX=XT scan code, BH=0.
+WasKeyEvent proc near
+ push ax
+ push bx
+ call WasResolveKey
+ pop bx
+ pop ax
+ jc wasKeyEventBad
+ pushf
+ push ax
+ push bp
+ push bx
+ push cx
+ push dx
+ push si
+ push di
+ push ds
+ push es
+ xor cx,cx
+ xor dx,dx
+ xor si,si
+ xor di,di
+ cld
+ call dword ptr wasKeyProc
+ pop es
+ pop ds
+ pop di
+ pop si
+ pop dx
+ pop cx
+ pop bx
+ pop bp
+ pop ax
+ popf
+ call WasWindowData
+ clc
+ ret
+wasKeyEventBad:
+ stc
+ ret
+WasKeyEvent endp
+
+commandKeyDown:
+ mov wasKeyAction,0
+ jmp wasKeyArg
+commandKeyUp:
+ mov wasKeyAction,1
+ jmp wasKeyArg
+commandKeyPress:
+ mov wasKeyAction,2
+wasKeyArg:
+ call FetchArg
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasButtonBad
+ lea si,wasInput
+ call WasFindKey
+ jc wasButtonBad
+ mov wasKeyPair,ax
+ mov bl,ah
+ xor bh,bh
+ cmp byte ptr wasKeysHeld[bx],0
+ je wasKeyNotHeld
+ cmp wasKeyAction,1
+ jne wasButtonBad
+ call WasKeyUp
+ jc wasKeyUnavailable
+ jmp wasButtonOK
+wasKeyNotHeld:
+ cmp wasKeyAction,1
+ je wasButtonBad
+ call WasKeyDown
+ jc wasKeyUnavailable
+ cmp wasKeyAction,0
+ je wasButtonOK
+ call WasKeyUp
+ jc wasKeyUnavailable
+ jmp wasButtonOK
+wasKeyUnavailable:
+ lea si,keyUnavailableTrace
+ call TraceLine
+ mov wasResult,2
+ mov wasErrorCode,50
+ jmp wasLoop
+ ; SI = NUL-terminated name. AX = scan:VK; CF if unknown.
+ ; Preserve caller's parse pointers. Compact variable-length CODE records.
+WasFindKey proc near
+ push bx
+ push cx
+ push si
+ push di
+ mov bx,offset keyNameTable
+ mov cx,keyNameCount
+wasKeyFind:
+ push si
+ lea di,[bx+2]
+wasKeyCompare:
+ lodsb
+ cmp al,'a'
+ jb wasKeyCompareUpper
+ cmp al,'z'
+ ja wasKeyCompareUpper
+ sub al,32
+wasKeyCompareUpper:
+ cmp al,cs:[di]
+ jne wasKeyNext
+ inc di
+ or al,al
+ jnz wasKeyCompare
+ pop si
+ mov ax,cs:[bx]
+ clc
+ jmp wasKeyFindDone
+wasKeyNext:
+ pop si
+ add bx,2
+wasKeySkipName:
+ inc bx
+ cmp byte ptr cs:[bx-1],0
+ jne wasKeySkipName
+ loop wasKeyFind
+ stc
+wasKeyFindDone:
+ pop di
+ pop si
+ pop cx
+ pop bx
+ ret
+WasFindKey endp
+
+; Composite commands require no script-held keys, so rollback never releases
+; unrelated script state. Physical keyboard state is not changed or queried.
+WasCompositeReady proc near
+ mov bx,127
+wasCompositeHeld:
+ cmp byte ptr wasKeysHeld[bx],0
+ jne wasCompositeBusy
+ dec bx
+ jnz wasCompositeHeld
+ clc
+ ret
+wasCompositeBusy:
+ stc
+ ret
+WasCompositeReady endp
+
+; KEYCOMBO CTRL+SHIFT+F2: validate entire chord before emitting any event.
+; Reuse wasLHS scratch (four pairs + sentinel); no extra resident buffer.
+commandKeyCombo:
+ call FetchArg
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasButtonBad
+ call WasCompositeReady
+ jc wasButtonBad
+ lea si,wasInput
+ lea di,wasLHS
+ xor dx,dx                 ; modifier mask (DL)
+wasComboPart:
+ mov bx,si
+wasComboScan:
+ mov al,[bx]
+ or al,al
+ jz wasComboFound
+ cmp al,'+'
+ je wasComboFound
+ inc bx
+ jmp wasComboScan
+wasComboFound:
+ mov byte ptr [bx],0
+ mov dh,al                 ; separator or end
+ call WasFindKey
+ jc wasButtonBad
+ cmp dh,0
+ je wasComboLast
+ cmp al,16
+ jb wasButtonBad
+ cmp al,18
+ ja wasButtonBad
+ mov cl,al
+ sub cl,16
+ mov ch,1
+ shl ch,cl
+ test dl,ch
+ jnz wasButtonBad
+ or dl,ch
+ stosw
+ lea si,[bx+1]
+ jmp wasComboPart
+wasComboLast:
+ cmp dl,0
+ je wasButtonBad
+ cmp al,16
+ jb wasComboStore
+ cmp al,18
+ jbe wasButtonBad
+wasComboStore:
+ stosw
+ xor ax,ax
+ stosw
+ lea si,wasLHS
+wasComboDown:
+ lodsw
+ or ax,ax
+ jz wasComboUpStart
+ mov wasKeyPair,ax
+ push si
+ call WasKeyDown
+ pop si
+ jc wasCompositeError
+ cmp wasStop,0
+ jne wasCompositeError
+ jmp wasComboDown
+wasComboUpStart:
+ sub si,4
+wasComboUp:
+ mov ax,[si]
+ mov wasKeyPair,ax
+ push si
+ call WasKeyUp
+ pop si
+ jc wasCompositeError
+ cmp si,offset wasLHS
+ je wasButtonOK
+ sub si,2
+ jmp wasComboUp
+
+; TYPE requires a complete quoted argument; validate all characters before
+; starting, then emit native key transitions using a US keyboard map.
+commandType:
+ mov si,wasNextSI
+ cmp byte ptr [si],'"'
+ jne wasButtonBad
+ inc si
+wasTypeQuote:
+ lodsb
+ or al,al
+ jz wasButtonBad
+ cmp al,'"'
+ jne wasTypeQuote
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasButtonBad
+ call FetchArg
+ call WasCompositeReady
+ jc wasButtonBad
+ lea si,wasInput
+wasTypeValidate:
+ lodsb
+ or al,al
+ jz wasTypeStart
+ cmp al,32
+ jb wasButtonBad
+ cmp al,126
+ ja wasButtonBad
+ jmp wasTypeValidate
+wasTypeStart:
+ lea si,wasInput
+wasTypeNext:
+ lodsb
+ or al,al
+ jz wasButtonOK
+ cmp wasStop,0
+ jne wasCompositeError
+ sub al,32
+ xor ah,ah
+ shl ax,1
+ mov bx,ax
+ mov ax,word ptr cs:typeMap[bx]
+ push si
+ test ah,80h
+ jz wasTypePress
+ and ah,7Fh
+ push ax
+ mov wasKeyPair,2A10h      ; SHIFT, scan 42
+ call WasKeyDown
+ pop ax
+ jc wasTypeErrorPop
+wasTypePress:
+ mov wasKeyPair,ax
+ call WasKeyDown
+ jc wasTypeErrorPop
+ call WasKeyUp
+ jc wasTypeErrorPop
+ cmp byte ptr wasKeysHeld[42],0
+ je wasTypeDone
+ mov wasKeyPair,2A10h
+ call WasKeyUp
+ jc wasTypeErrorPop
+wasTypeDone:
+ pop si
+ jmp wasTypeNext
+wasTypeErrorPop:
+ pop si
+wasCompositeError:
+ call WasReleaseKeys
+ jmp wasKeyUnavailable
+
+WasKeyDown proc near
+ mov ax,wasKeyPair
+ mov bl,ah
+ xor bh,bh
+ xor ah,ah
+ call WasKeyEvent
+ jc wasKeyDownBad
+ mov ax,wasKeyPair
+ mov bl,ah
+ xor bh,bh
+ mov wasKeysHeld[bx],al
+ call WasInputYield
+ clc
+wasKeyDownBad:
+ ret
+WasKeyDown endp
+WasKeyUp proc near
+ mov ax,wasKeyPair
+ mov bl,ah
+ xor bh,bh
+ mov ah,80h
+ call WasKeyEvent
+ jc wasKeyUpBad
+ mov ax,wasKeyPair
+ mov bl,ah
+ xor bh,bh
+ mov byte ptr wasKeysHeld[bx],0
+ call WasInputYield
+ clc
+wasKeyUpBad:
+ ret
+WasKeyUp endp
+; Release only keys pressed by this script, including modifiers, on END/FAIL.
+WasReleaseKeys proc near
+ mov bx,127
+wasReleaseKeyNext:
+ mov al,wasKeysHeld[bx]
+ or al,al
+ jz wasReleaseKeySkip
+ mov ah,bl
+ mov wasKeyPair,ax
+ push bx
+ call WasKeyUp
+ pop bx
+ jc wasReleaseKeyBad
+wasReleaseKeySkip:
+ dec bx
+ jnz wasReleaseKeyNext
+ clc
+wasReleaseKeyBad:
+ ret
+WasReleaseKeys endp
+; Both recovery paths are attempted even if either callback fails.
+WasReleaseAll proc near
+ call WasReleaseMouse
+ pushf
+ call WasReleaseKeys
+ pop ax
+ jc wasReleaseAllBad
+ test ax,1
+ jnz wasReleaseAllBad
+ clc
+ ret
+wasReleaseAllBad:
+ stc
+ ret
+WasReleaseAll endp
+
+commandReleaseInput:
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasButtonBad
+ call WasReleaseAll
+ jc wasButtonUnavailable
+ jmp wasButtonOK
+WasReleaseMouse proc near
+ test wasMouseHeld,1
+ jz wasReleaseRight
+ mov wasMouseMask,1
+ mov wasMouseUpFlag,4
+ call WasButtonUp
+ jc wasReleaseBad
+wasReleaseRight:
+ test wasMouseHeld,2
+ jz wasReleaseDone
+ mov wasMouseMask,2
+ mov wasMouseUpFlag,16
+ call WasButtonUp
+ jc wasReleaseBad
+wasReleaseDone:
+ clc
+wasReleaseBad:
+ ret
+WasReleaseMouse endp
+
 commandWait:
  ; WAIT milliseconds, currently bounded 0..59000; resolves to 10ms ticks.
  ; DOS 2Ch time is available to Win1/2/3 real-mode applications;
@@ -591,6 +2447,186 @@ ENDIF
  mov wasResult,0
  jmp wasLoop
 wasWaitStopped:
+IFDEF WAS_WIN300
+ call WasStopTimer
+ENDIF
+ jmp wasExit
+
+; WAITFOR FILE "path" TIMEOUT n (milliseconds; required 0..59000).
+; This is a cooperative, bounded witness poll, never a blocking DOS wait.
+; RESULT 0=readable file; 1=timeout; 2=DOS open/close error.
+; ERRORCODE is the real DOS failure on RESULT=2, zero otherwise.
+; Reuse the idle SNAP path buffer (no extra 260-byte DGROUP buffer).
+commandWaitFor:
+ mov wasWaitWindow,0
+ call FetchArg
+ lea si,wasInput
+ lea di,cmdFILE
+ call EqualStrings
+ jc wasWaitForFileArg
+ lea si,wasInput
+ lea di,cmdWINDOW
+ call EqualStrings
+ jnc wasCmdFailure
+ mov wasWaitWindow,1
+ mov wasWindowHwnd,0
+ call FetchArg
+ lea si,wasInput
+ lea di,wasWindowCaption
+ mov cx,127
+ cmp byte ptr [si],0
+ je wasWaitForWindowArgBad
+wasWaitForCaptionCopy:
+ lodsb
+ stosb
+ or al,al
+ jz wasWaitForTimeoutArg
+ loop wasWaitForCaptionCopy
+wasWaitForWindowArgBad:
+ mov wasResult,2
+ mov wasErrorCode,87
+ jmp wasLoop
+wasWaitForFileArg:
+ call FetchArg
+ cmp byte ptr wasInput,0
+ je wasCmdFailure
+ lea si,wasInput
+ lea di,wasSnapPath
+ call CopyString260
+wasWaitForTimeoutArg:
+ call FetchArg
+ lea si,wasInput
+ lea di,cmdTIMEOUT
+ call EqualStrings
+ jnc wasCmdFailure
+ call FetchArg
+ lea si,wasInput
+ call ParseUInt
+ jc wasCmdFailure
+ cmp ax,59000
+ ja wasCmdFailure
+ mov si,wasNextSI
+ call TrimSI
+ cmp byte ptr [si],0
+ jne wasCmdFailure
+ ; Round up to a full 10-ms tick (TIMEOUT 0 makes one probe).
+ add ax,9
+ xor dx,dx
+ mov bx,10
+ div bx
+ mov wasWaitCs,ax
+ call WasClockCs
+ mov wasWaitStart,ax
+IFDEF WAS_WIN300
+ ; Use the proven NULL-window timer/WaitMessage path from WAIT so
+ ; headless Windows 3 tasks do not consume a busy-spin CPU loop.
+ mov wasTimerId,0
+ cmp wasWaitCs,0
+ je wasWaitForPoll
+ xor ax,ax
+ push ax               ; hWnd=NULL
+ inc ax
+ push ax               ; timer ID 1
+ mov ax,100
+ push ax               ; pulse every 100ms
+ xor ax,ax
+ push ax               ; TIMERPROC segment=NULL
+ push ax               ; TIMERPROC offset=NULL
+ call SetTimer
+ mov bx,@data
+ mov ds,bx
+ mov es,bx
+ cld
+ mov wasTimerId,ax
+ or ax,ax
+ jz wasWaitForPoll
+ mov uiPumpAny,1
+ENDIF
+wasWaitForPoll:
+ cmp wasWaitWindow,0
+ je wasWaitForFilePoll
+ call WasFindWindow
+ cmp ax,1
+ je wasWaitForPending
+ mov wasResult,ax
+ mov wasErrorCode,0
+ or ax,ax
+ jz wasWaitForDone
+ mov wasErrorCode,87
+ jmp wasWaitForDone
+wasWaitForFilePoll:
+ mov ax,3D00h
+ lea dx,wasSnapPath
+ call Dos3Call
+ jnc wasWaitForOpened
+ cmp ax,2              ; DOS file not found: still pending
+ je wasWaitForPending
+ cmp ax,3              ; DOS path not found: still pending
+ je wasWaitForPending
+ mov wasErrorCode,ax  ; unexpected access/device error: fail explicitly
+ mov wasResult,2
+ jmp wasWaitForDone
+wasWaitForOpened:
+ mov bx,ax
+ mov ah,3Eh
+ call Dos3Call
+ jc wasWaitForCloseError
+ mov wasResult,0
+ mov wasErrorCode,0
+ jmp wasWaitForDone
+wasWaitForCloseError:
+ mov wasErrorCode,ax
+ mov wasResult,2
+ jmp wasWaitForDone
+wasWaitForPending:
+ call WasClockCs
+ sub ax,wasWaitStart
+ jnc wasWaitForDelta
+ add ax,6000           ; DOS 2Ch minute wrap; timeout < 60s
+wasWaitForDelta:
+ cmp ax,wasWaitCs
+ jae wasWaitForTimeout
+IFDEF WAS_WIN300
+ cmp wasTimerId,0
+ je wasWaitForYield
+ call WaitMessage
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ jmp wasWaitForPump
+wasWaitForYield:
+ENDIF
+ call Yield
+wasWaitForPump:
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ ; Pump even headless, with UiPump's fixed eight-message bound.
+ xor ax,ax
+ mov al,uiPumpAny
+ push ax
+ mov uiPumpAny,1
+ call UiPump
+ pop ax
+ mov uiPumpAny,al
+ mov ax,@data
+ mov ds,ax
+ mov es,ax
+ cld
+ cmp wasStop,0
+ jne wasWaitForStopped
+ jmp wasWaitForPoll
+wasWaitForTimeout:
+ mov wasResult,1
+ mov wasErrorCode,0
+wasWaitForDone:
+IFDEF WAS_WIN300
+ call WasStopTimer
+ENDIF
+ jmp wasLoop
+wasWaitForStopped:
 IFDEF WAS_WIN300
  call WasStopTimer
 ENDIF
@@ -1268,6 +3304,7 @@ wasQuitFail:
  call TraceLine
  mov wasRC,1
 wasExit:
+ call WasReleaseAll
  ; Return the optional iconic window before closing files/Windows.
  call UiClose
  cmp wasShutdown,0
@@ -1829,9 +3866,80 @@ wasCheckBpp:
  lea si,wasWord
  lea di,sysBPP
  call EqualStrings
- jnc wasCheckDiskFree
+ jnc wasCheckMouseX
  mov ax,12               ; BITSPIXEL, multiply by PLANES=14
  jmp wasQueryScreen
+wasCheckMouseX:
+ lea si,wasWord
+ lea di,sysMOUSEHELD
+ call EqualStrings
+ jnc wasCheckMouseXActual
+ xor ax,ax
+ mov al,wasMouseHeld
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckMouseXActual:
+ lea si,wasWord
+ lea di,sysMOUSEX
+ call EqualStrings
+ jnc wasCheckMouseY
+ call WasReadMouse
+ mov ax,wasMousePoint
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckMouseY:
+ lea si,wasWord
+ lea di,sysMOUSEY
+ call EqualStrings
+ jnc wasCheckWinX
+ call WasReadMouse
+ mov ax,wasMousePoint+2
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckWinX:
+ lea si,wasWord
+ lea di,sysWINX
+ call EqualStrings
+ jnc wasCheckWinY
+ call WasReadWindow
+ jc wasWindowVarMissing
+ mov ax,wasWindowOrigin
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckWinY:
+ lea si,wasWord
+ lea di,sysWINY
+ call EqualStrings
+ jnc wasCheckWinW
+ call WasReadWindow
+ jc wasWindowVarMissing
+ mov ax,wasWindowOrigin+2
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckWinW:
+ lea si,wasWord
+ lea di,sysWINW
+ call EqualStrings
+ jnc wasCheckWinH
+ call WasReadWindow
+ jc wasWindowVarMissing
+ mov ax,wasWindowRect+4
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasCheckWinH:
+ lea si,wasWord
+ lea di,sysWINH
+ call EqualStrings
+ jnc wasCheckDiskFree
+ call WasReadWindow
+ jc wasWindowVarMissing
+ mov ax,wasWindowRect+6
+ call FormatDecimal
+ jmp wasBuiltInReady
+wasWindowVarMissing:
+ mov ax,0FFFFh
+ call FormatDecimal
+ jmp wasBuiltInReady
 wasCheckDiskFree:
  ; DISKFREE(C) is evaluated on demand via DOS INT 21h AH=36h,
  ; returning decimal BYTES. A 32-bit saturated maximum is permitted.
@@ -2418,6 +4526,36 @@ cmdLOGFILE   db 'LOGFILE',0
 PUBLIC cmdLOGCLOSE
 cmdLOGCLOSE  db 'LOGClose',0
 cmdWAIT      db 'WAIT',0
+cmdDOEVENTS  db 'DOEVENTS',0
+cmdWAITFOR   db 'WAITFOR',0
+cmdMOUSEMOVE db 'MOUSEMOVE',0
+cmdMOUSEDOWN db 'MOUSEDOWN',0
+cmdMOUSEUP db 'MOUSEUP',0
+cmdMOUSECLICK db 'MOUSECLICK',0
+cmdMOUSEDBLCLICK db 'MOUSEDBLCLICK',0
+cmdRELEASEINPUT db 'RELEASEINPUT',0
+cmdKEYDOWN db 'KEYDOWN',0
+cmdKEYUP db 'KEYUP',0
+cmdKEYPRESS db 'KEYPRESS',0
+cmdKEYCOMBO db 'KEYCOMBO',0
+cmdTYPE db 'TYPE',0
+inputKeyName db 'KEYBOARD',0
+keyUnavailableTrace db 'KEYBOARD_CALLBACK_UNAVAILABLE',0
+
+
+cmdWINDOWFOCUS db 'WINDOWFOCUS',0
+inputUserName db 'USER',0
+inputMouseName db 'MOUSE',0
+inputLeftName db 'LEFT',0
+inputRightName db 'RIGHT',0
+inputUnavailableTrace db 'INPUT_CALLBACK_UNAVAILABLE',0
+inputDragTrace db 'INPUT_DRAG_FAILED',0
+inputProbePath db 'INABI.DAT',0
+cmdWINDOWSELECT db 'WINDOWSELECT',0
+winRelName db 'REL',0
+cmdFILE      db 'FILE',0
+cmdWINDOW    db 'WINDOW',0
+cmdTIMEOUT   db 'TIMEOUT',0
 cmdSET       db 'SET',0
 cmdCHDIR     db 'CHDIR',0
 cmdCD        db 'CD',0
@@ -2464,6 +4602,13 @@ sysDATE      db 'DATE',0
 sysERRORCODE db 'ERRORCODE',0
 sysRESULT    db 'RESULT',0
 sysWINVER    db 'WINVER',0
+sysMOUSEX    db 'MOUSEX',0
+sysMOUSEHELD db 'MOUSEHELD',0
+sysMOUSEY    db 'MOUSEY',0
+sysWINX db 'WINX',0
+sysWINY db 'WINY',0
+sysWINW db 'WINW',0
+sysWINH db 'WINH',0
 sysSCREENW   db 'SCREENW',0
 sysSCREENH   db 'SCREENH',0
 sysBPP       db 'BPP',0

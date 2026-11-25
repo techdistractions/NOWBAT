@@ -52,12 +52,12 @@ snapBpp      dw 0
 snapPaletteN dw 0
 snapPixelLo  dw 0
 snapPixelHi  dw 0
-snapBF       db 54 dup(0)
+extrn snapBF:byte ; storage in final zero arena (WASUI.ASM)
 ; BMP palette reuses snapRow[0..1023] before any scanlines are written.
 ; The 256-entry RGBQUAD table is streamed to disk before snapRow is
 ; cleared or filled for pixel data. Saves 1024 DGROUP bytes on XT.
-snapRow      db 4096 dup(0)   ; COMPAT row or FAST batch, never a framebuffer
-snapPlaneBuf db 400 dup(0)    ; four 100-byte planar slots; 640/800 widths
+extrn snapRow:byte ; COMPAT row or FAST batch, never a framebuffer
+extrn snapPlaneBuf:byte ; four 100-byte planar slots; 640/800 widths
 snapDefault  dw 0
 
 .code

@@ -1,0 +1,23 @@
+NOWBAT SNAP CAPTURE - DISPLAY COMPATIBILITY
+
+SNAP syntax:
+  SNAP "SCREEN.BMP"
+  SNAP "SCREEN.BMP" BPP=4
+  SNAP "CROP.BMP",0,0,63,31,BPP=1
+
+SNAP selects FAST direct video memory by default. Omitted coordinates
+capture the whole desktop; omitted BPP selects desktop-native depth.
+FAST supports known 1-bpp and 4-bpp layouts and requires X and the
+capture width divisible by 8. Unsupported display modes return RESULT=2.
+
+The compatibility command accepts the same arguments:
+  SNAPSAFE "SCREEN.BMP"
+  SNAPSAFE "SCREEN.BMP" BPP=4
+  SNAPSAFE "CROP.BMP",0,0,63,31,BPP=1
+
+SNAPSAFE always uses the original GDI GetPixel path. This remains the
+safe method for unknown video drivers and accurate RGB conversion.
+
+IMPORTANT: Hardware palette accuracy on FAST colour captures may vary,
+especially in 800x600 16-colour mode 6Ah under Windows 1. Use SNAPSAFE
+when accurate RGB conversion or an unfamiliar display driver is needed.

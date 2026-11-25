@@ -57,10 +57,71 @@ uiWinMajor db 0         ; Win1: no system menu/About; Win2/3 retain both
 uiName db 'NOWBAT',0
 uiSwitchName db 'Switch To...',0
 uiAboutName db 'About...',0
-uiAboutMessage db 'NOWBAT - Windows Admin Script',13,10,'Version: 0.0.47',0
+uiAboutMessage db 'NOWBAT - Windows Admin Script',13,10,'Version: 0.0.54',0
 ; MSG: HWND,UINT,WPARAM,LPARAM,DWORD time,POINT(x,y), 18 bytes.
 ; UiClass is already registered before this union is used as message space.
 uiMsg EQU uiClass
+
+; W082: contiguous zero-filled DGROUP storage, kept at the end of _DATA.
+; All link response files place WASUI last. The host removes only this
+; verified zero tail, preserving minalloc, offsets and all relocation chains.
+; Startup explicitly clears these bytes before the script is parsed.
+ db "NOWBAT_ZERO_W054",0
+PUBLIC WasZeroStart,WasZeroEnd
+WasZeroStart LABEL BYTE
+PUBLIC wasInput
+wasInput       db 260 dup(0)
+PUBLIC wasScript
+wasScript      db 128 dup(0)
+PUBLIC wasLine
+wasLine        db 260 dup(0)
+PUBLIC wasArg
+wasArg         db 260 dup(0)
+PUBLIC wasWord
+wasWord        db 32 dup(0)
+PUBLIC wasLHS
+wasLHS         db 260 dup(0)
+PUBLIC wasRHS
+wasRHS         db 260 dup(0)
+PUBLIC wasLabel
+wasLabel       db 32 dup(0)
+PUBLIC wasVarNames
+wasVarNames    db 128 dup(0)  ; 8 x 16
+PUBLIC wasVarValues
+wasVarValues   db 768 dup(0)  ; 8 x 96
+PUBLIC wasSnapPath
+wasSnapPath    db 260 dup(0)
+PUBLIC wasExecPath
+wasExecPath    db 128 dup(0)
+PUBLIC wasWindowCaption
+wasWindowCaption db 128 dup(0)
+PUBLIC wasWindowScratch
+wasWindowScratch db 128 dup(0)
+PUBLIC wasKeysHeld
+wasKeysHeld db 128 dup(0) ; indexed by XT scan, value=VK (supports OEM VKs)
+PUBLIC wasRawTail
+wasRawTail     db 128 dup(0)
+PUBLIC tarSource
+tarSource   db 260 dup(0)
+PUBLIC tarPrefix
+tarPrefix   db 130 dup(0)
+PUBLIC tarName
+tarName     db 100 dup(0)
+PUBLIC tarDTA
+tarDTA      db 43 dup(0)
+PUBLIC tarHeader
+tarHeader   db 512 dup(0)
+PUBLIC tarBuffer
+tarBuffer   db 1024 dup(0)  ; 2x I/O throughput without large DGROUP cost
+PUBLIC snapBF
+snapBF       db 54 dup(0)
+PUBLIC snapRow
+snapRow      db 4096 dup(0)   ; COMPAT row or FAST batch, never a framebuffer
+PUBLIC snapPlaneBuf
+snapPlaneBuf db 400 dup(0)    ; four 100-byte planar slots; 640/800 widths
+PUBLIC fsDta
+fsDta       db 43 dup(0)        ; DOS findfirst DTA: name at +30
+WasZeroEnd LABEL BYTE
 
 .code
 ; UiOpen - register a tiny class and display the native iconic window.

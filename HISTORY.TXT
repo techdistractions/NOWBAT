@@ -1,0 +1,26 @@
+NOWBAT - VERSION HISTORY
+========================
+
+0.0.54
+------
+- Added DOEVENTS and bounded WAITFOR FILE / WAITFOR WINDOW commands.
+- Added window selection, focus and client-relative mouse coordinates.
+- Added native mouse movement, left/right clicks, double-clicks and drags.
+- Added native keyboard down/up/press, modifier combinations and TYPE.
+- Added RELEASEINPUT and automatic recovery of script-held input on exit.
+- Added live cursor position and selected-window geometry variables.
+- Improved compatibility with early Windows mouse and keyboard drivers.
+- Fixed drag positioning overshoot and held-button movement.
+- Reduced executable size by removing zero-filled storage from the file.
+
+0.0.47
+------
+- Added fast SNAP capture using direct video memory on supported modes.
+- Added SNAPSAFE for GDI-based screenshot capture on other display modes.
+- Made DATE and TIME variables reflect the current DOS clock.
+
+0.0.46
+------
+- Initial release for Windows 1.x, 2.x and Windows 3.0 real mode.
+- Script control flow, variables, logging, application launch, filesystem
+  commands, BMP screenshot capture and uncompressed TAR archives.
