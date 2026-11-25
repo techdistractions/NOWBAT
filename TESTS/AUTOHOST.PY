@@ -89,8 +89,62 @@ def rejects(cb):
     raise AssertionError('Verifier accepted tampered synthetic evidence')
 
 
+def manifest_fixture_check():
+    """Exercise the real AutoUAT preflight with synthetic fixture bytes.
+
+    Mock NE parsing only; fixture reads and manifest comparisons remain real.
+    The expected keys mirror the complete MAKE static gate, including WGEOM.
+    """
+    import importlib.machinery
+    import types
+    import json
+    from unittest.mock import patch
+    loader=importlib.machinery.SourceFileLoader('autouat_preflight_test',str(ROOT/'HOST'/'AUTOUAT.PY'))
+    auto=types.ModuleType(loader.name)
+    auto.__file__=str(ROOT/'HOST'/'AUTOUAT.PY')
+    loader.exec_module(auto)
+    with tempfile.TemporaryDirectory() as d:
+        root=Path(d)
+        paths={name:root/'DIST'/name/'NOWBAT.EXE' for name in ('WIN101','WIN300')}
+        for kind in ('WCHILD','WWAIT','WGEOM'):
+            paths[kind]=root/'BUILD'/(kind+'.EXE')
+        for target in ('WIN101','WIN300'):
+            for terminal in ('NBTEND','NBTPASS','NBTFAIL'):
+                paths[target+':'+terminal]=root/'BUILD'/'TERMS'/target/(terminal+'.EXE')
+        for key,path in paths.items():
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_bytes(b'NOWBAT_BUILD=W054\0'+key.encode('ascii'))
+        (root/'TESTS').mkdir()
+        (root/'TESTS'/'AUTO.WAS').write_bytes(b'END')
+        recorded={'version':'0.0.54','sources':{},
+                  'binaries':{key:u.sha256(path.read_bytes()) for key,path in paths.items()}}
+        (root/'BUILD'/'MANIFEST.JSON').write_text(json.dumps(recorded))
+        def fake_ne(path):
+            target=2 if 'WIN300' in path.parts else 0
+            return dict(target=target,expected_win_ver=0x300 if target else 0,
+                        ordinal_imports=[],autodata_minalloc=0,size=100,
+                        sha256=u.sha256(path.read_bytes()))
+        with patch.object(auto,'ROOT',root), patch.object(auto.audit,'check_source'), \
+             patch.object(auto.audit,'parse_ne',side_effect=fake_ne), \
+             patch.object(auto.audit,'required_native_ordinals',return_value=set()), \
+             patch.object(auto.audit.iconbuild,'check_icons'), \
+             patch.object(auto.audit.necompact,'check_packed'), \
+             patch.object(auto.audit,'missing_binary_commands',return_value=[]), \
+             patch.object(auto.audit,'check_dgroup_budget'), \
+             patch.object(auto.audit,'build_manifest',side_effect=lambda hashes:dict(recorded,binaries=hashes)):
+            assert auto.check_current_build()==recorded['binaries']
+            paths['WGEOM'].write_bytes(b'changed fixture')
+            try:
+                auto.check_current_build()
+            except ValueError as exc:
+                assert 'binaries/WGEOM' in str(exc),str(exc)
+            else:
+                raise AssertionError('AutoUAT accepted a changed WGEOM fixture')
+    return 2
+
+
 def main():
-    checks=0
+    checks=manifest_fixture_check()
     script=(ROOT/'TESTS'/'AUTO.WAS').read_text(encoding='ascii').upper()
     for cmd in u.AUTO_COMMANDS:
         # 'SHOWICON=YES' and 'SHOWICON=NO' are not space separated.

@@ -53,9 +53,11 @@ def check_current_build():
         if ne['size']>audit.MAX_RELEASE_EXE:
             raise ValueError(name+': executable size ceiling')
         hashes[name]=ne['sha256']
-    child=ROOT/'BUILD'/'WCHILD.EXE'
-    hashes['WCHILD']=runuat.sha256(child.read_bytes())
-    hashes['WWAIT']=runuat.sha256((ROOT/'BUILD'/'WWAIT.EXE').read_bytes())
+    # MAKE also builds the independent window/event witness WGEOM.
+    # It is not launched by the original command matrix, but its bytes
+    # must still match the complete MAKE manifest (no omitted fixtures).
+    for kind in ('WCHILD','WWAIT','WGEOM'):
+        hashes[kind]=runuat.sha256((ROOT/'BUILD'/(kind+'.EXE')).read_bytes())
     for target in ('WIN101','WIN300'):
         for terminal in ('NBTEND','NBTPASS','NBTFAIL'):
             path=ROOT/'BUILD'/'TERMS'/target/(terminal+'.EXE')
@@ -80,7 +82,18 @@ def check_current_build():
         # Every other source and every Win16 binary hash remains mandatory.
         m['sources'].pop('TESTS/AUTO.WAS',None)
     if recorded!=actual:
-        raise ValueError('Built source/binary hashes do not match MAKE ALL; rebuild before AUTOUAT')
+        # Name the exact changed/missing/extra inputs rather than leaving
+        # the operator with an opaque manifest mismatch after a fresh MAKE.
+        differences=[]
+        for section in ('sources','binaries'):
+            expected=recorded.get(section,{})
+            current=actual.get(section,{})
+            differences.extend(section+'/'+key for key in sorted(expected.keys() | current.keys())
+                               if expected.get(key)!=current.get(key))
+        if recorded.get('version')!=actual.get('version'):
+            differences.append('version')
+        raise ValueError('Built source/binary hashes do not match MAKE ALL; rebuild before AUTOUAT: '
+                         + ', '.join(differences or ['manifest metadata']))
     # AutoUAT script is not part of the executable build, but its hash is
     # frozen in each STAGE.JSON/RESULT.JSON for native evidence authenticity.
     script=ROOT/'TESTS'/'AUTO.WAS'
