@@ -47,7 +47,7 @@ FAST returns `%RESULT%=2` for unsupported modes instead of silently falling back
 
 ## Build from source
 
-On a Windows build PC, install [JWASM](https://github.com/JWasm/JWasm), [NBJWLINK](https://github.com/techdistractions/NBJWLINK) and Python 3. Put the tools on PATH or in `TOOLS`, or configure `JWASM_EXE` and `NBJWLINK_EXE` in a private `MAKE.LOCAL.BAT`. Run `MAKE` to build both targets. The executables are in `DIST/WIN101` and `DIST/WIN300`. MAKE also creates `DIST/NOWBAT_SOURCE.ZIP` and `DIST/NOWBAT_BINARIES.ZIP`. It does not require DOSBox-X or a Windows guest. The tools may also be located in a sibling `TOOLS` directory (including its `HOST` subdirectory).
+On a Windows build PC, install [JWASM](https://github.com/JWasm/JWasm), [NBJWLINK](https://github.com/techdistractions/NBJWLINK) and Python 3. Put the tools on PATH or in `TOOLS`, or configure `JWASM_EXE` and `NBJWLINK_EXE` in a private `MAKE.LOCAL.BAT`. Run `MAKE` to build both targets. The executables are in `DIST/WIN101` and `DIST/WIN300`. MAKE also creates `DIST/NOWBAT_SOURCE_0.0.54.ZIP` and `DIST/NOWBAT_BINARIES_0.0.54.ZIP` (versioned from `VERSION.TXT`). MAKE verifies the exact ZIP contents and prints their full paths and SHA-256 hashes. It does not require DOSBox-X or a Windows guest. The tools may also be located in a sibling `TOOLS` directory (including its `HOST` subdirectory).
 
 ## Compatibility and limits
 

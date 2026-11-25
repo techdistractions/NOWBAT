@@ -6,6 +6,8 @@ build outputs and other files beside the source never enter either archive.
 This checks executable structure and size, not native application behaviour.
 """
 from pathlib import Path
+import hashlib
+import re
 import struct
 import sys
 import zipfile
@@ -60,7 +62,21 @@ def write_zip(path, entries):
                              compresslevel=9)
 
 
+def verify_zip(path, entries):
+    """Read back the complete archive; reject extra files or altered bytes."""
+    expected = {'NOWBAT/' + name: data for name, data in entries.items()}
+    with zipfile.ZipFile(path) as archive:
+        if sorted(archive.namelist()) != sorted(expected):
+            raise ValueError('unexpected archive contents: ' + path.name)
+        for name, data in expected.items():
+            if archive.read(name) != data:
+                raise ValueError('archive content mismatch: ' + name)
+
+
 def main():
+    version = (ROOT / 'VERSION.TXT').read_text(encoding='ascii').strip()
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise ValueError('invalid VERSION.TXT')
     source = {name: (ROOT / name).read_bytes() for name in SOURCE_FILES}
     binary = {name: source[name] for name in USER_FILES}
     for target in TARGETS:
@@ -68,12 +84,13 @@ def main():
         data = (DIST / name).read_bytes()
         validate(target, data)
         binary[name] = data
-    outputs = ((DIST / 'NOWBAT_SOURCE.ZIP', source),
-               (DIST / 'NOWBAT_BINARIES.ZIP', binary))
+    outputs = ((DIST / f'NOWBAT_SOURCE_{version}.ZIP', source),
+               (DIST / f'NOWBAT_BINARIES_{version}.ZIP', binary))
     # Stage both packages; a failed build must never leave a stale ZIP.
     try:
         for path, entries in outputs:
             write_zip(path.with_suffix('.tmp'), entries)
+            verify_zip(path.with_suffix('.tmp'), entries)
         for path, _ in outputs:
             path.with_suffix('.tmp').replace(path)
     except Exception:
@@ -81,6 +98,11 @@ def main():
             path.unlink(missing_ok=True)
             path.with_suffix('.tmp').unlink(missing_ok=True)
         raise
+    # Print the exact new asset paths, counts and hashes for the operator.
+    for path, entries in outputs:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        print(f'PACK PASS: {path} ({len(entries)} files, {path.stat().st_size} bytes)')
+        print('SHA256: ' + digest)
 
 
 if __name__ == '__main__':

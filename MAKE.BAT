@@ -3,6 +3,18 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 if not "%~1"=="" goto usage
 rem Build and package only the runtime. No emulator or test fixtures.
+set "VERSION="
+set /p "VERSION="<VERSION.TXT
+if not defined VERSION goto fail
+rem Discard only the current build's generated archives, including legacy names.
+rem Do not remove older versioned releases or files outside DIST.
+if exist DIST\NOWBAT_SOURCE.ZIP del /q DIST\NOWBAT_SOURCE.ZIP
+if exist DIST\NOWBAT_BINARIES.ZIP del /q DIST\NOWBAT_BINARIES.ZIP
+if exist "DIST\NOWBAT_SOURCE_%VERSION%.ZIP" del /q "DIST\NOWBAT_SOURCE_%VERSION%.ZIP"
+if exist "DIST\NOWBAT_BINARIES_%VERSION%.ZIP" del /q "DIST\NOWBAT_BINARIES_%VERSION%.ZIP"
+if exist "DIST\NOWBAT_SOURCE_%VERSION%.ZIP" goto fail
+if exist "DIST\NOWBAT_BINARIES_%VERSION%.ZIP" goto fail
+echo NOWBAT %VERSION% - public build and packaging
 if exist "%~dp0MAKE.LOCAL.BAT" call "%~dp0MAKE.LOCAL.BAT"
 set "ASM="
 set "LINKER="
@@ -62,7 +74,9 @@ if errorlevel 1 goto fail
 %PY% -B HOST\packdist.py
 if errorlevel 1 goto fail
 echo.
-echo MAKE PASS: DIST\NOWBAT_SOURCE.ZIP and DIST\NOWBAT_BINARIES.ZIP
+if not exist "DIST\NOWBAT_SOURCE_%VERSION%.ZIP" goto fail
+if not exist "DIST\NOWBAT_BINARIES_%VERSION%.ZIP" goto fail
+echo MAKE PASS: DIST\NOWBAT_SOURCE_%VERSION%.ZIP and DIST\NOWBAT_BINARIES_%VERSION%.ZIP
 echo Executables: DIST\WIN101\NOWBAT.EXE and DIST\WIN300\NOWBAT.EXE
 exit /b 0
 :probe
@@ -84,6 +98,7 @@ exit /b 1
 echo Usage: MAKE
 exit /b 2
 :fail
+if defined VERSION del /q "DIST\NOWBAT_SOURCE_%VERSION%.ZIP" "DIST\NOWBAT_BINARIES_%VERSION%.ZIP" >nul 2>&1
 del /q DIST\WIN101\NOWBAT.EXE DIST\WIN300\NOWBAT.EXE >nul 2>&1
 del /q DIST\NOWBAT_SOURCE.ZIP DIST\NOWBAT_BINARIES.ZIP >nul 2>&1
 echo MAKE FAIL: no valid new package was produced. Check the error above.

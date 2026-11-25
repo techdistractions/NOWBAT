@@ -40,7 +40,8 @@ BUILDING FROM SOURCE
 On a Windows build PC, install JWASM (assembler) and NBJWLINK (16-bit
 Windows executable linker), plus Python 3 for icons and ZIP creation.
 Run MAKE.BAT in the source directory. See README.md for tool setup.
-MAKE builds both targets and creates the source and binary ZIPs in DIST.
+MAKE builds both targets and creates versioned source and binary ZIPs
+in DIST, e.g. NOWBAT_SOURCE_0.0.54.ZIP and NOWBAT_BINARIES_0.0.54.ZIP.
 These build tools are NOT needed to run NOWBAT.
 
 GUI automation tested in DOSBox-X on Windows 1/2/3 real mode.
