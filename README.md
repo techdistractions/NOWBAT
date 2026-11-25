@@ -32,6 +32,92 @@ END
 
 `DOEVENTS` lets other Windows applications process queued events. `WAITFOR FILE` and `WAITFOR WINDOW` provide bounded readiness checks. Mouse down/up, double-click and held-button movement support drag operations. Keyboard commands include `KEYDOWN`, `KEYUP`, `KEYPRESS`, `KEYCOMBO` and `TYPE` (US printable ASCII, Caps Lock off). Use `RELEASEINPUT` to recover script-held keys and buttons. Check `%RESULT%` and `%ERRORCODE%`, and verify the application's actual state rather than relying on successful injection alone.
 
+### Mouse: click, double-click and right-click
+
+Move to a screen position (in pixels), then perform a native mouse action. These are independent examples; choose the action appropriate for the application.
+
+```text
+MOUSEMOVE 100,80
+MOUSECLICK LEFT
+```
+
+```text
+MOUSEMOVE 100,80
+MOUSEDBLCLICK LEFT
+```
+
+```text
+MOUSEMOVE 100,80
+MOUSECLICK RIGHT
+```
+
+### Mouse: drag within a window
+
+Select a window by its exact caption and drag from client position (20,20) to (100,60). Relative coordinates are measured in pixels from the top-left of the client area, excluding the title bar and borders. Adjust both points to suit the application.
+
+```text
+WINDOWFOCUS "My Application"
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSEMOVE REL,20,20
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSEDOWN LEFT
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSEMOVE REL,100,60
+IF %RESULT% NE 0 THEN GOTO FAILED
+MOUSEUP LEFT
+IF %RESULT% NE 0 THEN GOTO FAILED
+DOEVENTS
+END
+:FAILED
+RELEASEINPUT
+END
+```
+
+### Keyboard: enter text and press individual keys
+
+With the intended edit control already focused, type text, start a new line and enter more text. `TYPE` produces native keystrokes; use `KEYPRESS` for control and navigation keys.
+
+```text
+TYPE "Hello from NOWBAT!"
+KEYPRESS ENTER
+TYPE "Automated on an 8088."
+KEYPRESS HOME
+```
+
+### Keyboard: shortcuts and held modifiers
+
+Send a shortcut with `KEYCOMBO`. The application determines what the shortcut does.
+
+```text
+KEYCOMBO CTRL+S
+KEYCOMBO ALT+F
+```
+
+For explicit control of modifier state, use separate down/up commands. This example selects five characters to the right of the current caret in a compatible text editor.
+
+```text
+KEYDOWN SHIFT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYPRESS RIGHT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYPRESS RIGHT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYPRESS RIGHT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYPRESS RIGHT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYPRESS RIGHT
+IF %RESULT% NE 0 THEN GOTO FAILED
+KEYUP SHIFT
+IF %RESULT% NE 0 THEN GOTO FAILED
+END
+:FAILED
+RELEASEINPUT
+END
+```
+
+These snippets assume the target window or control is ready and that the coordinates and shortcuts are appropriate for it. For unattended scripts, check `%RESULT%` after each operation, allow the application to process events, and verify the resulting application state. Keep physical modifiers released and use a US keyboard layout with Caps Lock off when entering text.
+
 ## Capture screenshots
 
 `SNAP` uses fast direct-video capture on supported modes; `SNAPSAFE` uses the slower GDI compatibility path. Both accept the same syntax:
